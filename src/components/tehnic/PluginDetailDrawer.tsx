@@ -34,16 +34,25 @@ export function PluginDetailDrawer({
       <DrawerContent className="max-h-[85vh]">
         <DrawerHeader className="pb-2 text-left">
           <DrawerTitle className="flex items-center gap-2 text-base">
-            {plugin?.icon}
+            {/* Haloul stă pe ::after al containerului (vezi nota din
+                styles.css), nu pe iconiță — altfel ar înlocui orice animație
+                proprie a ei. */}
+            <span className="pulse-glow flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/50">
+              {plugin?.icon}
+            </span>
             {plugin?.label ?? ""}
+            <span className="live-dot ml-auto" />
           </DrawerTitle>
           <DrawerDescription className="text-left">{plugin?.description}</DrawerDescription>
         </DrawerHeader>
 
         {plugin && (
           <div className="max-h-[65vh] space-y-2.5 overflow-y-auto overscroll-contain px-4 pb-6 stagger-in">
-            <div className="whitespace-pre-line rounded-2xl glass-card p-3 text-xs leading-relaxed text-muted-foreground">
-              {plugin.details}
+            <div className="relative overflow-hidden rounded-2xl glass-card p-3">
+              <span className="shimmer-sweep" />
+              <div className="relative z-10 whitespace-pre-line text-xs leading-relaxed text-muted-foreground">
+                {plugin.details}
+              </div>
             </div>
 
             <div className="rounded-2xl glass-card divide-y divide-border/50 text-xs">
@@ -88,7 +97,7 @@ export function PluginDetailDrawer({
                       Niciunul. Pornești urmărirea din drawer-ul unui serial, în Bibliotecă.
                     </div>
                   ) : (
-                    <div className="space-y-1.5">
+                    <div className="space-y-1.5 stagger-in">
                       {watch.shows.map((sh) => {
                         const when = nextEpisodeWhen(sh.nextEpisodeAirDate, sh.nextEpisodeAirstamp);
                         return (
@@ -129,7 +138,7 @@ export function PluginDetailDrawer({
                     <div className="text-emerald-400">Toate completate.</div>
                   ) : (
                     <>
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap gap-1 stagger-in">
                         {watch.missingTitles.map((m) => (
                           <span
                             key={`${m.show}-${m.code}`}
