@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { ExternalLink, Shuffle, Plus } from "lucide-react";
@@ -36,7 +36,10 @@ export function SceneViewer({ item, onClose }: { item: DiscoverTitle; onClose: (
       })
     : null;
 
-  const otherVideosCount = useMemo(() => Math.max(0, videos.length - 1), [videos]);
+  // Fără useMemo: `videos` e o listă nouă la fiecare randare cât timp
+  // query-ul n-a răspuns (`?? []`), deci memo-ul se invalida oricum de
+  // fiecare dată — plătea contabilitatea fără să sară vreun calcul.
+  const otherVideosCount = Math.max(0, videos.length - 1);
 
   return (
     <>

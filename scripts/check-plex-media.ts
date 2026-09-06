@@ -28,36 +28,38 @@ interface Item {
   leafCount?: number;
 }
 
-const sections = (
-  await api<{ MediaContainer: { Directory: Section[] } }>("/library/sections")
-).MediaContainer.Directory;
+const sections = (await api<{ MediaContainer: { Directory: Section[] } }>("/library/sections"))
+  .MediaContainer.Directory;
 
 const db = getDb();
 const mediaKeys = new Set(
   (
-    db.prepare("SELECT plex_rating_key FROM media WHERE plex_rating_key IS NOT NULL").all() as Array<{
+    db
+      .prepare("SELECT plex_rating_key FROM media WHERE plex_rating_key IS NOT NULL")
+      .all() as Array<{
       plex_rating_key: string;
     }>
   ).map((r) => r.plex_rating_key),
 );
 const mediaTitles = new Set(
   (
-    db
-      .prepare("SELECT DISTINCT lower(title) t FROM media WHERE parent_id IS NULL")
-      .all() as Array<{ t: string }>
+    db.prepare("SELECT DISTINCT lower(title) t FROM media WHERE parent_id IS NULL").all() as Array<{
+      t: string;
+    }>
   ).map((r) => r.t),
 );
 
 for (const s of sections) {
   if (s.type !== "movie" && s.type !== "show") continue;
-  const items = (
-    await api<{ MediaContainer: { Metadata?: Item[] } }>(`/library/sections/${s.key}/all`)
-  ).MediaContainer.Metadata ?? [];
+  const items =
+    (await api<{ MediaContainer: { Metadata?: Item[] } }>(`/library/sections/${s.key}/all`))
+      .MediaContainer.Metadata ?? [];
 
   const missing: string[] = [];
   for (const it of items) {
     if (s.type === "movie") {
-      if (!mediaKeys.has(it.ratingKey)) missing.push(`${it.title}${it.year ? ` (${it.year})` : ""}`);
+      if (!mediaKeys.has(it.ratingKey))
+        missing.push(`${it.title}${it.year ? ` (${it.year})` : ""}`);
     } else {
       // Pentru seriale comparăm la nivel de EPISOD, după ratingKey: titlul
       // rândului din `media` e cel românesc de la TMDB și diferă intenționat
@@ -76,6 +78,8 @@ for (const s of sections) {
     }
   }
 
-  console.log(`\n### ${s.title} [${s.type}] — ${items.length} în Plex, ${missing.length} lipsă din Bibliotecă`);
+  console.log(
+    `\n### ${s.title} [${s.type}] — ${items.length} în Plex, ${missing.length} lipsă din Bibliotecă`,
+  );
   for (const m of missing) console.log(`   · ${m}`);
 }
