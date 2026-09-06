@@ -372,3 +372,74 @@ export async function setShowWatchCore(input: SetShowWatchInput): Promise<void> 
        WHERE id = ? AND media_type = 'tv_show'`,
   ).run(input.quality ?? "1080p", from, input.mediaId);
 }
+
+// ---------------------------------------------------------------------------
+// Numele episoadelor
+// ---------------------------------------------------------------------------
+
+// Câte seriale completăm cel mult într-o rulare — cu getTmdbAllSeasonsInternal
+// e o singură cerere TMDB per serial, dar nu are rost să le luăm pe toate
+// deodată la prima pornire după migrare.
+const MAX_TITLE_SHOWS_PER_RUN = 5;
+
+// Umple `episode_title` pentru episoadele care încă n-au unul.
+//
+// Aceeași abordare declarativă ca restul fișierului: nu ținem minte ce am
+// completat, ci întrebăm de fiecare dată ce lipsește. Rularea e un no-op
+// ieftin (un singur SELECT) când nu lipsește nimic, se auto-repară după un
+// restart, și prinde din mers atât episoadele descărcate acum, cât și cele
+// existente dinaintea coloanei.
+export async function fillMissingEpisodeTitles(): Promise<number> {
+  const db = getDb();
+  const missing = db
+    .prepare(
+      `SELECT e.id, e.season, e.episode, p.tmdb_id AS tmdb_id
+         FROM media e
+         JOIN media p ON p.id = e.parent_id
+        WHERE e.media_type = 'episode'
+          AND e.episode_title IS NULL
+          AND e.season IS NOT NULL
+          AND e.episode IS NOT NULL
+          AND p.tmdb_id IS NOT NULL`,
+    )
+    .all() as unknown as Array<{
+    id: number;
+    season: number;
+    episode: number;
+    tmdb_id: number;
+  }>;
+  if (missing.length === 0) return 0;
+
+  const byShow = new Map<number, typeof missing>();
+  for (const row of missing) {
+    const list = byShow.get(row.tmdb_id);
+    if (list) list.push(row);
+    else byShow.set(row.tmdb_id, [row]);
+  }
+
+  const { getTmdbAllSeasonsInternal } = await import("../tmdb/tmdb.functions");
+  const update = db.prepare("UPDATE media SET episode_title = ? WHERE id = ?");
+  let filled = 0;
+
+  for (const [tmdbId, rows] of [...byShow].slice(0, MAX_TITLE_SHOWS_PER_RUN)) {
+    const seasons = [...new Set(rows.map((r) => r.season))].sort((a, b) => a - b);
+    const schema = await getTmdbAllSeasonsInternal(tmdbId, seasons).catch(() => []);
+    const titles = new Map<string, string>();
+    for (const s of schema) {
+      for (const ep of s.episodes) {
+        titles.set(`${s.seasonNumber}x${ep.episodeNum}`, ep.title);
+      }
+    }
+    for (const r of rows) {
+      const title = titles.get(`${r.season}x${r.episode}`);
+      // "Episodul 8" e placeholder-ul pe care TMDB îl întoarce cât timp n-are
+      // încă titlul real (frecvent în primele ore după difuzare). Nu-l
+      // salvăm: ar deveni permanent, fiindcă rândul n-ar mai fi "lipsă".
+      if (!title || new RegExp(`^episodul\\s*${r.episode}$`, "i").test(title)) continue;
+      update.run(title, r.id);
+      filled++;
+    }
+  }
+  if (filled > 0) console.log(`[show-watch] Completate ${filled} nume de episoade`);
+  return filled;
+}

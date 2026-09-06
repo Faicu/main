@@ -621,13 +621,13 @@ export function TitleDetailDrawer({
                             {group.episodes.length === 1 ? "episod" : "episoade"}
                           </span>
                         </div>
-                        <div className="grid grid-cols-2 gap-1 sm:grid-cols-3">
+                        <div className="space-y-1">
                           {group.episodes.map((ep) => (
                             <button
                               key={ep.mediaId}
                               type="button"
                               onClick={() => setOpenEpisodeId(ep.mediaId)}
-                              className="flex items-center gap-1.5 rounded-lg bg-muted/40 px-2 py-1.5 text-left transition-all hover:bg-muted/60 active:scale-[0.99]"
+                              className="flex w-full items-center gap-2 rounded-lg bg-muted/40 px-2 py-1.5 text-left transition-all hover:bg-muted/60 active:scale-[0.99]"
                             >
                               {ep.status === "in_library" ? (
                                 ep.watchedByMe ? (
@@ -638,9 +638,17 @@ export function TitleDetailDrawer({
                               ) : (
                                 <CircleDashed className="h-3 w-3 shrink-0 animate-pulse text-blue-400" />
                               )}
-                              <span className="min-w-0 flex-1 truncate text-[11px]">
+                              <span className="shrink-0 text-[11px] font-medium tabular-nums">
                                 {episodeCode(ep.season, ep.episode) ?? "—"}
                               </span>
+                              {/* Numele lipsește cât timp completarea din TMDB
+                                  n-a ajuns la episodul ăsta — rândul rămâne
+                                  valid, doar cu codul. */}
+                              {ep.episodeTitle && (
+                                <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+                                  {ep.episodeTitle}
+                                </span>
+                              )}
                             </button>
                           ))}
                         </div>

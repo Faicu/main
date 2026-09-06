@@ -170,6 +170,12 @@ export function getDb(): DatabaseSync {
       subtitle_checked_at TEXT,
       quality TEXT,
       duration_ms INTEGER,
+      -- Titlul episodului (doar pe rândurile 'episode'): coloana title ține
+      -- titlul SERIALULUI și pe rândurile de episod, deci numele episodului
+      -- n-avea unde sta. Se completează din TMDB, o dată, de
+      -- fillMissingEpisodeTitles — nu se cere live la fiecare deschidere de
+      -- drawer, ca Biblioteca să rămână doar SELECT-uri.
+      episode_title TEXT,
       -- Urmărire episoade noi — au sens DOAR pe rândul-părinte 'tv_show'.
       -- Stau aici, pe rândul serialului, nu într-o tabelă separată: prima
       -- implementare (pinned_items, ștearsă în v14) ținea urmărirea într-o
@@ -646,6 +652,21 @@ function applyCleanups(database: DatabaseSync): void {
         console.log(`[db] Migrare v19: eliminate ${orphans.changes} seriale fără episoade`);
       }
       database.exec("PRAGMA user_version = 19");
+    }
+
+    if (version < 20) {
+      // v20: numele episoadelor. Rândurile de tip 'episode' țineau în `title`
+      // titlul serialului, deci numele episodului nu exista nicăieri în
+      // aplicație — era rezolvat din TMDB doar ca să intre în textul unei
+      // notificări (buildTorrentDisplayName) și aruncat imediat după.
+      // Completarea efectivă e treaba lui fillMissingEpisodeTitles.
+      try {
+        database.exec("ALTER TABLE media ADD COLUMN episode_title TEXT");
+        console.log("[db] Migrare v20: adăugat media.episode_title");
+      } catch {
+        // coloana există deja dintr-o rulare anterioară
+      }
+      database.exec("PRAGMA user_version = 20");
     }
   }
 }

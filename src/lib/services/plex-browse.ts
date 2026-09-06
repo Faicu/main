@@ -387,6 +387,9 @@ export interface ShowEpisodeEntry {
   mediaId: number;
   season: number | null;
   episode: number | null;
+  // Null cât timp completarea din TMDB n-a ajuns încă la episodul ăsta (vezi
+  // fillMissingEpisodeTitles) — UI-ul arată atunci doar codul SxxEyy.
+  episodeTitle: string | null;
   addedAt: number;
   status: "in_library" | "downloading" | "processing";
   watchedByMe: boolean;
@@ -496,6 +499,7 @@ interface MediaRow {
   subtitle_source: string | null;
   subtitle_detail: string | null;
   subtitle_checked_at: string | null;
+  episode_title: string | null;
   tv_status: string | null;
   auto_download: number;
   auto_download_quality: string | null;
@@ -531,8 +535,8 @@ async function buildDetailFromMediaRow(
   const epRows = isShow
     ? (db
         .prepare(
-          `SELECT id, season, episode, original_title, title, plex_rating_key, plex_added_at,
-                  added_at, completed_at, is_season_pack
+          `SELECT id, season, episode, original_title, title, episode_title,
+                  plex_rating_key, plex_added_at, added_at, completed_at, is_season_pack
              FROM media WHERE parent_id = ?
              ORDER BY season, episode`,
         )
@@ -542,6 +546,7 @@ async function buildDetailFromMediaRow(
         episode: number | null;
         original_title: string | null;
         title: string;
+        episode_title: string | null;
         plex_rating_key: string | null;
         plex_added_at: number | null;
         added_at: string;
@@ -611,6 +616,7 @@ async function buildDetailFromMediaRow(
         mediaId: e.id,
         season: e.season,
         episode: e.episode,
+        episodeTitle: e.episode_title,
         addedAt:
           e.plex_added_at ??
           Math.floor(new Date(`${e.added_at.replace(" ", "T")}Z`).getTime() / 1000),
@@ -666,7 +672,9 @@ async function buildDetailFromMediaRow(
   return {
     mediaId: row.id,
     ratingKey: row.plex_rating_key,
-    title: isEpisode || isShow ? "" : row.title,
+    // Pentru episoade, coloana title ține titlul serialului (acela merge în
+    // `show`); ce arătăm ca titlu e numele episodului, dacă îl avem.
+    title: isShow ? "" : isEpisode ? (row.episode_title ?? "") : row.title,
     type: isEpisode ? "episode" : isShow ? "tv_show" : "movie",
     show: isEpisode || isShow ? row.title : null,
     season: row.season,
@@ -736,7 +744,7 @@ export const getPlexTitleDetail = createServerFn({ method: "GET" })
            overview_ro, genres, quality, has_romanian_subtitle, has_romanian_audio, duration_ms, torrent_name, torrent_hash,
            category_name, size, freeleech, internal, save_path, added_via,
            plex_rating_key, is_season_pack, requested_by_user_id, added_at, completed_at,
-           subtitle_source, subtitle_detail, subtitle_checked_at,
+           subtitle_source, subtitle_detail, subtitle_checked_at, episode_title,
            tv_status, auto_download, auto_download_quality, auto_download_from, watch_last_checked_at
            FROM media WHERE id = ?`,
         )
