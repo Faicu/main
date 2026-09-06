@@ -104,16 +104,36 @@ export const checkShowNow = createServerFn({ method: "POST" })
 // nimic nu loghează nimic (corect, altfel ar umple jurnalul la fiecare 3 ore),
 // deci jurnalul n-ar arăta niciodată că plugin-ul e viu.
 export const getShowWatchStatus = createServerFn({ method: "GET" }).handler(
-  async (): Promise<{ watchedShows: number; lastCheckedAt: string | null }> => {
+  async (): Promise<{
+    watchedShows: number;
+    lastCheckedAt: string | null;
+    missingEpisodeTitles: number;
+  }> => {
     const { requireAuth } = await import("../auth/admin.server");
     await requireAuth();
     const { getDb } = await import("../db");
-    const row = getDb()
+    const db = getDb();
+    const row = db
       .prepare(
         `SELECT COUNT(*) AS n, MAX(watch_last_checked_at) AS last
            FROM media WHERE media_type = 'tv_show' AND auto_download = 1`,
       )
       .get() as { n: number; last: string | null };
-    return { watchedShows: row?.n ?? 0, lastCheckedAt: row?.last ?? null };
+    // Aceeași condiție ca fillMissingEpisodeTitles — stare tranzitorie, de
+    // obicei 0; apare doar între descărcarea unui episod și următorul ciclu.
+    const titles = db
+      .prepare(
+        `SELECT COUNT(*) AS n
+           FROM media e JOIN media p ON p.id = e.parent_id
+          WHERE e.media_type = 'episode' AND e.episode_title IS NULL
+            AND e.season IS NOT NULL AND e.episode IS NOT NULL
+            AND p.tmdb_id IS NOT NULL`,
+      )
+      .get() as { n: number };
+    return {
+      watchedShows: row?.n ?? 0,
+      lastCheckedAt: row?.last ?? null,
+      missingEpisodeTitles: titles?.n ?? 0,
+    };
   },
 );
