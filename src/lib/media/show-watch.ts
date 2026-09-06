@@ -516,6 +516,14 @@ export async function setShowWatchCore(input: SetShowWatchInput): Promise<void> 
 // deodată la prima pornire după migrare.
 const MAX_TITLE_SHOWS_PER_RUN = 5;
 
+// Cât timp mai sperăm că TMDB completează titlul unui episod deja difuzat,
+// înainte să acceptăm placeholder-ul lui generic ca răspuns final.
+const PLACEHOLDER_GRACE_MS = 14 * 24 * 60 * 60 * 1000;
+
+// "Episodul 8" / "Episode 8" — titlul generic pe care TMDB îl întoarce când
+// episodul n-are (încă) nume propriu.
+export const GENERIC_EPISODE_TITLE = /^episo(?:dul|de)\s*\d+$/i;
+
 // Umple `episode_title` pentru episoadele care încă n-au unul.
 //
 // Aceeași abordare declarativă ca restul fișierului: nu ținem minte ce am
@@ -558,19 +566,33 @@ export async function fillMissingEpisodeTitles(): Promise<number> {
   for (const [tmdbId, rows] of [...byShow].slice(0, MAX_TITLE_SHOWS_PER_RUN)) {
     const seasons = [...new Set(rows.map((r) => r.season))].sort((a, b) => a - b);
     const schema = await getTmdbAllSeasonsInternal(tmdbId, seasons).catch(() => []);
-    const titles = new Map<string, string>();
+    const titles = new Map<string, { title: string; airDate: string | null }>();
     for (const s of schema) {
       for (const ep of s.episodes) {
-        titles.set(`${s.seasonNumber}x${ep.episodeNum}`, ep.title);
+        titles.set(`${s.seasonNumber}x${ep.episodeNum}`, { title: ep.title, airDate: ep.airDate });
       }
     }
     for (const r of rows) {
-      const title = titles.get(`${r.season}x${r.episode}`);
+      const found = titles.get(`${r.season}x${r.episode}`);
+      if (!found) continue;
       // "Episodul 8" e placeholder-ul pe care TMDB îl întoarce cât timp n-are
-      // încă titlul real (frecvent în primele ore după difuzare). Nu-l
-      // salvăm: ar deveni permanent, fiindcă rândul n-ar mai fi "lipsă".
-      if (!title || new RegExp(`^episodul\\s*${r.episode}$`, "i").test(title)) continue;
-      update.run(title, r.id);
+      // încă titlul real — frecvent în primele ore după difuzare, dar și
+      // permanent pentru emisiuni ale căror episoade n-au titluri (reality
+      // show-uri, televiziune locală).
+      //
+      // Pentru un episod difuzat recent sărim peste, ca să reîncercăm când
+      // TMDB îl completează. Pentru unul difuzat demult acceptăm
+      // placeholder-ul: TMDB n-o să-l mai schimbe, iar altfel rândul rămâne
+      // "lipsă" pe veci și îl reinterogăm la fiecare 10 minute la nesfârșit
+      // (găsit la "Insula Iubirii" S10, unde TMDB n-are titluri deloc).
+      // UI-ul ascunde oricum numele generice, deci nu se vede nimic urât.
+      if (GENERIC_EPISODE_TITLE.test(found.title)) {
+        const airedLongAgo =
+          found.airDate != null &&
+          Date.now() - new Date(found.airDate).getTime() > PLACEHOLDER_GRACE_MS;
+        if (!airedLongAgo) continue;
+      }
+      update.run(found.title, r.id);
       filled++;
     }
   }

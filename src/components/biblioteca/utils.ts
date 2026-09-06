@@ -14,6 +14,16 @@ export function episodeCode(season: number | null, episode: number | null): stri
     : null;
 }
 
+// "Episodul 8" — TMDB întoarce asta când episodul n-are nume propriu, iar
+// show-watch îl salvează ca răspuns final după două săptămâni (altfel ar
+// reinteroga la nesfârșit). N-are rost afișat lângă "S10E08": ar spune de
+// două ori același lucru.
+const GENERIC_EPISODE_TITLE = /^episo(?:dul|de)\s*\d+$/i;
+
+export function displayEpisodeTitle(title: string | null): string | null {
+  return title && !GENERIC_EPISODE_TITLE.test(title.trim()) ? title : null;
+}
+
 export function itemLabel(item: PlexBrowseItem): string {
   return item.type === "movie" ? item.title : (item.show ?? "—");
 }

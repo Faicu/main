@@ -43,7 +43,13 @@ import { setShowWatch, checkShowNow } from "@/lib/media/media.functions";
 import { formatMs, formatBytes, formatSpeed, formatEta } from "@/lib/format";
 import { Progress } from "@/components/ui/progress";
 import { StatusBadge } from "./StatusBadge";
-import { episodeCode, addedDate, groupBySeason, nextEpisodeWhen } from "./utils";
+import {
+  episodeCode,
+  addedDate,
+  groupBySeason,
+  nextEpisodeWhen,
+  displayEpisodeTitle,
+} from "./utils";
 
 // Drawer-ul de detalii al unui titlu din Bibliotecă — complet independent de
 // listă: primește doar mediaId, își gestionează singur toată starea (query
@@ -272,7 +278,7 @@ export function TitleDetailDrawer({
               {d?.type === "episode" && (
                 <DrawerDescription className="text-left text-sm font-medium text-foreground leading-snug mt-1">
                   {episodeCode(d.season, d.episode) ?? ""}
-                  {d.title ? ` · ${d.title}` : ""}
+                  {displayEpisodeTitle(d.title) ? ` · ${d.title}` : ""}
                 </DrawerDescription>
               )}
               {d?.originalTitle &&
@@ -674,7 +680,7 @@ export function TitleDetailDrawer({
                               {/* Numele lipsește cât timp completarea din TMDB
                                   n-a ajuns la episodul ăsta — rândul rămâne
                                   valid, doar cu codul. */}
-                              {ep.episodeTitle && (
+                              {displayEpisodeTitle(ep.episodeTitle) && (
                                 <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
                                   {ep.episodeTitle}
                                 </span>
