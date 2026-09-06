@@ -538,6 +538,7 @@ async function finishFilelistDownload(ctx: {
         torrentName: params.torrentName,
         imdb: params.imdb,
         torrentHash,
+        auto: params.media?.addedVia === "auto",
       }),
     )
     .then((n) =>

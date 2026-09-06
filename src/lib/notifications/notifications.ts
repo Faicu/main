@@ -156,11 +156,14 @@ export async function buildTorrentAddedNotification(params: {
   torrentName: string;
   imdb?: string | null;
   torrentHash?: string | null;
+  // Pornit de urmărirea serialelor, nu de un om — titlu distinct, ca o
+  // descărcare apărută "din senin" să fie imediat explicabilă.
+  auto?: boolean;
 }): Promise<PushNotification> {
   const { displayName, image, seasonLabel } = await resolveTorrentDisplay(params);
   const quality = detectTorrentQuality(params.torrentName);
   return {
-    title: "⬇️ Descărcare Inițiată",
+    title: params.auto ? "🤖 Descărcare Automată" : "⬇️ Descărcare Inițiată",
     body: `${displayName}${seasonLabel ? ` — ${seasonLabel}` : ""} [${quality}]`,
     image,
     url: "/biblioteca",

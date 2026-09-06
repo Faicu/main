@@ -3,17 +3,7 @@ import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import {
-  Search,
-  Film,
-  Tv,
-  Eye,
-  Users,
-  ChevronDown,
-  ChevronRight,
-  Layers,
-  AlertTriangle,
-} from "lucide-react";
+import { Search, Film, Tv, Eye, Users, Layers, AlertTriangle, Radar } from "lucide-react";
 
 import { plexLibraryBrowseQuery } from "@/lib/queries";
 import { deleteMediaEntry } from "@/lib/filelist.functions";
@@ -21,11 +11,8 @@ import type { PlexBrowseItem } from "@/lib/services/plex-browse";
 import { StatusBadge } from "./StatusBadge";
 import { TitleDetailDrawer } from "./TitleDetailDrawer";
 import {
-  episodeCode,
   addedDate,
   itemLabel,
-  groupConsecutiveEpisodes,
-  groupBySeasonConsecutive,
   matchesQuery,
   isStaleUnwatched,
   sortItems,
@@ -40,8 +27,6 @@ export function BibliotecaList() {
   const [query, setQuery] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("recent");
   const [visible, setVisible] = useState(PAGE_SIZE);
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const [expandedSeasons, setExpandedSeasons] = useState<Set<string>>(new Set());
   const [selectedMediaId, setSelectedMediaId] = useState<number | null>(null);
   const [confirmDeleteTitle, setConfirmDeleteTitle] = useState<{
     mediaId: number;
@@ -61,7 +46,6 @@ export function BibliotecaList() {
       ),
     [allItems, query, sortMode],
   );
-  const rows = useMemo(() => groupConsecutiveEpisodes(filtered), [filtered]);
 
   async function confirmDeleteTitleAction() {
     if (!confirmDeleteTitle) return;
@@ -106,25 +90,10 @@ export function BibliotecaList() {
     return <div className="text-sm text-muted-foreground px-1">Biblioteca Plex e goală.</div>;
   }
 
-  function toggleGroup(key: string) {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
-
-  function toggleSeason(key: string) {
-    setExpandedSeasons((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
-
-  function renderRow(item: PlexBrowseItem, indent = false) {
+  // Un singur fel de rând, pentru filme și seriale deopotrivă — episoadele nu
+  // mai apar aici, ci doar în drawer-ul serialului.
+  function renderRow(item: PlexBrowseItem) {
+    const isShow = item.type === "tv_show";
     return (
       <button
         key={item.mediaId}
@@ -134,7 +103,7 @@ export function BibliotecaList() {
           e.stopPropagation();
           setSelectedMediaId(item.mediaId);
         }}
-        className={`flex w-full items-center gap-2 rounded-lg bg-muted/40 px-2 py-1.5 text-left transition-all hover:bg-muted/60 active:scale-[0.99] active:bg-muted ${indent ? "ml-4" : ""}`}
+        className="flex w-full items-center gap-2 rounded-lg bg-muted/40 px-2 py-1.5 text-left transition-all hover:bg-muted/60 active:scale-[0.99] active:bg-muted"
       >
         {item.thumbUrl ? (
           <img
@@ -143,20 +112,36 @@ export function BibliotecaList() {
             loading="lazy"
             alt=""
           />
-        ) : item.type === "movie" ? (
-          <Film className="h-3.5 w-3.5 shrink-0 text-amber-400" />
-        ) : (
+        ) : isShow ? (
           <Tv className="h-3.5 w-3.5 shrink-0 text-blue-400" />
+        ) : (
+          <Film className="h-3.5 w-3.5 shrink-0 text-amber-400" />
         )}
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs">
-            {indent ? (episodeCode(item.season, item.episode) ?? item.title) : itemLabel(item)}
-          </span>
+          <span className="block truncate text-xs">{itemLabel(item)}</span>
           <span className="block truncate text-[10px] text-muted-foreground">
-            {addedDate(item.addedAt)}
+            {isShow
+              ? `${item.seasonCount || 1} ${item.seasonCount === 1 ? "sezon" : "sezoane"} · ${item.episodeCount} ${item.episodeCount === 1 ? "episod" : "episoade"}`
+              : addedDate(item.addedAt)}
           </span>
         </span>
-        <StatusBadge status={item.status} progress={item.progress} />
+        {isShow && item.autoDownload && (
+          <span
+            title="Urmărit — episoadele noi se descarcă automat"
+            className="flex shrink-0 items-center rounded-full bg-violet-500/15 px-1.5 py-0.5 text-violet-400"
+          >
+            <Radar className="h-2.5 w-2.5" />
+          </span>
+        )}
+        {isShow && item.downloadingCount > 0 ? (
+          <span className="flex shrink-0 items-center gap-1 rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-400">
+            <Layers className="h-2.5 w-2.5" />
+            {item.downloadingCount}
+            {item.progress != null && ` · ${Math.round(item.progress)}%`}
+          </span>
+        ) : (
+          <StatusBadge status={item.status} progress={item.progress} />
+        )}
         {item.watchedCount > 0 && (
           <span className="flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground">
             <Users className="h-3 w-3" />
@@ -171,12 +156,21 @@ export function BibliotecaList() {
             <AlertTriangle className="h-2.5 w-2.5" />
           </span>
         )}
-        {item.watchedByMe && <Eye className="h-3 w-3 shrink-0 text-emerald-400" />}
+        {/* Pentru un serial, o bifă simplă "văzut" ar fi înșelătoare (ai văzut
+            un episod din 36?) — arătăm câte din câte. */}
+        {isShow && item.watchedEpisodes > 0 ? (
+          <span className="flex shrink-0 items-center gap-0.5 text-[10px] text-emerald-400">
+            <Eye className="h-3 w-3" />
+            {item.watchedEpisodes}/{item.episodeCount}
+          </span>
+        ) : (
+          item.watchedByMe && !isShow && <Eye className="h-3 w-3 shrink-0 text-emerald-400" />
+        )}
       </button>
     );
   }
 
-  const visibleRows = rows.slice(0, visible);
+  const visibleRows = filtered.slice(0, visible);
 
   return (
     <div className="space-y-3">
@@ -207,7 +201,7 @@ export function BibliotecaList() {
         </select>
       </div>
 
-      {rows.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="text-sm text-muted-foreground px-1">Niciun rezultat.</div>
       ) : (
         <div className="glass-card rounded-2xl p-3">
@@ -216,81 +210,9 @@ export function BibliotecaList() {
               tastă ar remonta containerul și ar reporni stagger-ul de la
               opacity: 0 — lista pâlpâia la fiecare caracter tastat. */}
           <div key={sortMode} className="space-y-1 stagger-in">
-            {visibleRows.map((row) =>
-              row.kind === "single" ? (
-                renderRow(row.item)
-              ) : (
-                <div key={row.key}>
-                  <button
-                    type="button"
-                    onClick={() => toggleGroup(row.key)}
-                    className="flex w-full items-center gap-2 rounded-lg bg-muted/40 px-2 py-1.5 text-left transition-all hover:bg-muted/60 active:scale-[0.99] active:bg-muted"
-                  >
-                    {row.items[0].thumbUrl ? (
-                      <img
-                        src={row.items[0].thumbUrl}
-                        className="h-8 w-8 shrink-0 rounded object-cover bg-muted"
-                        loading="lazy"
-                        alt=""
-                      />
-                    ) : (
-                      <Tv className="h-3.5 w-3.5 shrink-0 text-blue-400" />
-                    )}
-                    <span className="min-w-0 flex-1 truncate text-xs font-medium">{row.show}</span>
-                    <span className="flex shrink-0 items-center gap-1 rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-400">
-                      <Layers className="h-2.5 w-2.5" /> {row.items.length} episoade
-                    </span>
-                    {expandedGroups.has(row.key) ? (
-                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    )}
-                  </button>
-                  {expandedGroups.has(row.key) && (
-                    <div className="mt-1 space-y-1">
-                      {groupBySeasonConsecutive(row.items).map((seg, idx) => {
-                        const seasonKey = `${row.key}-s${seg.season ?? "x"}-${idx}`;
-                        if (seg.season == null) {
-                          return (
-                            <div key={seasonKey} className="space-y-1">
-                              {seg.items.map((it) => renderRow(it, true))}
-                            </div>
-                          );
-                        }
-                        return (
-                          <div key={seasonKey}>
-                            <button
-                              type="button"
-                              onClick={() => toggleSeason(seasonKey)}
-                              className="ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg bg-muted/30 px-2 py-1.5 text-left transition-all hover:bg-muted/50 active:scale-[0.99] active:bg-muted"
-                            >
-                              <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                                Sezonul {seg.season}
-                              </span>
-                              <span className="flex shrink-0 items-center gap-1 rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-400">
-                                <Layers className="h-2.5 w-2.5" /> {seg.items.length} episoade
-                              </span>
-                              {expandedSeasons.has(seasonKey) ? (
-                                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                              ) : (
-                                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                              )}
-                            </button>
-                            {expandedSeasons.has(seasonKey) && (
-                              <div className="mt-1 space-y-1">
-                                {seg.items.map((it) => renderRow(it, true))}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              ),
-            )}
+            {visibleRows.map((item) => renderRow(item))}
           </div>
-          {rows.length > visible && (
+          {filtered.length > visible && (
             <button
               type="button"
               onClick={() => setVisible((v) => v + PAGE_SIZE)}

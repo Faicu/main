@@ -170,6 +170,21 @@ export function getDb(): DatabaseSync {
       subtitle_checked_at TEXT,
       quality TEXT,
       duration_ms INTEGER,
+      -- Urmărire episoade noi — au sens DOAR pe rândul-părinte 'tv_show'.
+      -- Stau aici, pe rândul serialului, nu într-o tabelă separată: prima
+      -- implementare (pinned_items, ștearsă în v14) ținea urmărirea într-o
+      -- structură paralelă, legată de 'media' doar prin tmdb_id, și de-acolo
+      -- veneau toate bug-urile ei (rânduri duplicate, dedublare între două
+      -- liste, descărcare de N ori pentru N useri care fixaseră același
+      -- titlu). Rândul 'tv_show' e deja unic per serial și deja legat de
+      -- episoade prin parent_id — e locul corect.
+      auto_download INTEGER NOT NULL DEFAULT 0,
+      auto_download_quality TEXT,
+      -- Prima poziție de la care se descarcă ('S03E05'): activarea urmăririi
+      -- nu trebuie să tragă retroactiv tot ce lipsește din istoricul unui
+      -- serial cu 7 sezoane din care ai 2.
+      auto_download_from TEXT,
+      watch_last_checked_at TEXT,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_media_imdb ON media(imdb_id);
@@ -594,6 +609,43 @@ function applyCleanups(database: DatabaseSync): void {
         // coloanele există deja dintr-o rulare anterioară
       }
       database.exec("PRAGMA user_version = 18");
+    }
+
+    if (version < 19) {
+      // v19: urmărirea episoadelor noi revine, dar de data asta ca patru
+      // coloane pe rândul-părinte 'tv_show' din `media`, nu ca tabelă
+      // paralelă (vezi comentariul de la definiția tabelei).
+      for (const sql of [
+        "ALTER TABLE media ADD COLUMN auto_download INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE media ADD COLUMN auto_download_quality TEXT",
+        "ALTER TABLE media ADD COLUMN auto_download_from TEXT",
+        "ALTER TABLE media ADD COLUMN watch_last_checked_at TEXT",
+      ]) {
+        try {
+          database.exec(sql);
+        } catch {
+          // coloana există deja dintr-o rulare anterioară
+        }
+      }
+
+      // Seriale rămase fără niciun episod: rânduri-părinte create de
+      // backfill pentru titluri pe care Plex le lista, dar cărora nu li s-a
+      // legat niciodată conținut real. Curățarea existentă din log.ts le
+      // prinde doar la ștergerea unui episod al lor — astea n-au avut
+      // niciodată vreunul, deci rămâneau la nesfârșit (găsite 2 pe
+      // 2026-09-06: "Temptation Island - Reunion", "Plaha").
+      const orphans = database
+        .prepare(
+          `DELETE FROM media
+             WHERE media_type = 'tv_show'
+               AND torrent_hash IS NULL
+               AND id NOT IN (SELECT parent_id FROM media WHERE parent_id IS NOT NULL)`,
+        )
+        .run();
+      if (orphans.changes > 0) {
+        console.log(`[db] Migrare v19: eliminate ${orphans.changes} seriale fără episoade`);
+      }
+      database.exec("PRAGMA user_version = 19");
     }
   }
 }

@@ -21,6 +21,10 @@ import {
   ChevronRight,
   ExternalLink,
   XCircle,
+  ArrowLeft,
+  Radar,
+  RefreshCw,
+  CircleDashed,
 } from "lucide-react";
 
 import {
@@ -32,10 +36,11 @@ import {
 } from "@/components/ui/drawer";
 import { getPlexTitleDetail } from "@/lib/services.functions";
 import { correctSubtitleForMedia, deleteSubtitleForMedia } from "@/lib/filelist.functions";
+import { setShowWatch, checkShowNow } from "@/lib/media/media.functions";
 import { formatMs, formatBytes, formatSpeed, formatEta } from "@/lib/format";
 import { Progress } from "@/components/ui/progress";
 import { StatusBadge } from "./StatusBadge";
-import { episodeCode, addedDate } from "./utils";
+import { episodeCode, addedDate, groupBySeason } from "./utils";
 
 // Drawer-ul de detalii al unui titlu din Bibliotecă — complet independent de
 // listă: primește doar mediaId, își gestionează singur toată starea (query
@@ -63,14 +68,30 @@ export function TitleDetailDrawer({
   const [correcting, setCorrecting] = useState(false);
   const [deletingSubtitle, setDeletingSubtitle] = useState(false);
   const [showTech, setShowTech] = useState(false);
+  // Navigare serial → episod în ACELAȘI drawer, cu buton de întoarcere.
+  // Nu un al doilea drawer/dialog peste primul: overlay-urile Radix imbricate
+  // într-un Drawer vaul îngheață ecranul fără nicio eroare logată (vezi
+  // commit c76ce30 și incidentul din AddMediaWizard).
+  const [openEpisodeId, setOpenEpisodeId] = useState<number | null>(null);
+  const [savingWatch, setSavingWatch] = useState(false);
+  const [checkingNow, setCheckingNow] = useState(false);
+  const [pickingWatch, setPickingWatch] = useState(false);
 
   const correctFn = useServerFn(correctSubtitleForMedia);
   const deleteSubtitleFn = useServerFn(deleteSubtitleForMedia);
+  const setShowWatchFn = useServerFn(setShowWatch);
+  const checkShowNowFn = useServerFn(checkShowNow);
+
+  // Serialul rămâne "titlul de bază" al drawer-ului; când e deschis un episod,
+  // el devine subiectul afișat, iar butonul înapoi doar golește starea asta.
+  // Dacă titlul de bază a dispărut (ex. ștergere), episodul deschis peste el
+  // nu mai are context — nu ținem o cerere vie pentru un drawer închis.
+  const activeId = mediaId == null ? null : (openEpisodeId ?? mediaId);
 
   const detail = useQuery({
-    queryKey: ["plexTitleDetail", mediaId],
-    queryFn: () => getPlexTitleDetail({ data: { mediaId: mediaId! } }),
-    enabled: !!mediaId,
+    queryKey: ["plexTitleDetail", activeId],
+    queryFn: () => getPlexTitleDetail({ data: { mediaId: activeId! } }),
+    enabled: !!activeId,
     // Progres live cât timp titlul e în descărcare sau în așteptarea
     // indexării Plex — se oprește automat când trece la "in_library" (vezi
     // și plexLibraryBrowseQuery).
@@ -86,7 +107,71 @@ export function TitleDetailDrawer({
 
   function invalidateAfterMutation() {
     queryClient.invalidateQueries({ queryKey: ["plexLibraryBrowse"] });
-    if (mediaId) queryClient.invalidateQueries({ queryKey: ["plexTitleDetail", mediaId] });
+    // Ambele niveluri: o schimbare pe episod (subtitrare, ștergere) se vede și
+    // în lista de episoade a serialului de deasupra.
+    for (const id of new Set([mediaId, activeId])) {
+      if (id) queryClient.invalidateQueries({ queryKey: ["plexTitleDetail", id] });
+    }
+  }
+
+  async function toggleWatch(enabled: boolean, mode: "forward" | "backfill" = "forward") {
+    if (!d) return;
+    setSavingWatch(true);
+    const res = await setShowWatchFn({
+      data: { mediaId: d.mediaId, enabled, quality: d.autoDownloadQuality ?? "1080p", mode },
+    }).catch((e) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }));
+    setSavingWatch(false);
+    setPickingWatch(false);
+    if (!res.ok) {
+      toast.error("Nu am putut schimba urmărirea", { description: res.error });
+      return;
+    }
+    toast.success(enabled ? "Urmărire pornită" : "Urmărire oprită");
+    invalidateAfterMutation();
+  }
+
+  async function setWatchQuality(quality: string) {
+    if (!d) return;
+    setSavingWatch(true);
+    // Schimbarea calității pe un serial deja urmărit nu trebuie să mute
+    // punctul de pornire înapoi — de-aia "backfill" nu apare aici.
+    await setShowWatchFn({ data: { mediaId: d.mediaId, enabled: true, quality } }).catch(() => {});
+    setSavingWatch(false);
+    invalidateAfterMutation();
+  }
+
+  async function checkNow() {
+    if (!d) return;
+    setCheckingNow(true);
+    const toastId = toast.loading(`Verific episoade noi pentru „${d.show ?? d.title}”…`);
+    const res = await checkShowNowFn({ data: { mediaId: d.mediaId } }).catch((e) => ({
+      ok: false as const,
+      error: e instanceof Error ? e.message : String(e),
+    }));
+    setCheckingNow(false);
+    if (!res.ok) {
+      toast.error("Verificarea a eșuat", { id: toastId, description: res.error });
+      return;
+    }
+    const o = res.outcome;
+    if (o.downloaded.length > 0) {
+      toast.success(`Pornite ${o.downloaded.length}`, {
+        id: toastId,
+        description: o.downloaded.join(", "),
+        duration: 8000,
+      });
+    } else {
+      toast.info("Niciun episod nou de descărcat", {
+        id: toastId,
+        // Motivul contează: "lipsesc 3 episoade, dar niciun torrent 1080p" e
+        // altceva decât "ești la zi", iar fără el depanarea e ghicit.
+        description:
+          o.skipped ??
+          (o.missing.length > 0 ? `Lipsesc: ${o.missing.join(", ")}` : "Ești la zi cu serialul"),
+        duration: 8000,
+      });
+    }
+    invalidateAfterMutation();
   }
 
   async function correctSubtitle() {
@@ -136,9 +221,25 @@ export function TitleDetailDrawer({
   }
 
   return (
-    <Drawer open={!!mediaId} onOpenChange={(o) => !o && onClose()}>
+    <Drawer
+      open={!!mediaId}
+      onOpenChange={(o) => {
+        if (o) return;
+        setOpenEpisodeId(null);
+        onClose();
+      }}
+    >
       <DrawerContent className="max-h-[85vh]">
         <DrawerHeader className="pb-2 text-left">
+          {openEpisodeId != null && (
+            <button
+              type="button"
+              onClick={() => setOpenEpisodeId(null)}
+              className="mb-1 flex w-fit items-center gap-1 rounded-full bg-muted/60 px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <ArrowLeft className="h-3 w-3" /> Înapoi la serial
+            </button>
+          )}
           <div className="flex items-start gap-3">
             {d?.thumbUrl && (
               <img
@@ -288,11 +389,15 @@ export function TitleDetailDrawer({
                   <EyeOff className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                 )}
                 <span>
-                  {d.watchedByMe
-                    ? d.watchedByMeAt
-                      ? `Ai văzut acest titlu · ${addedDate(d.watchedByMeAt)}`
-                      : "Ai văzut acest titlu"
-                    : "Nu ai văzut acest titlu"}
+                  {d.type === "tv_show"
+                    ? // Pentru un serial, "ai văzut acest titlu" n-ar spune
+                      // nimic util — un episod din 36 e tot "văzut".
+                      `Ai văzut ${d.episodes.filter((e) => e.watchedByMe).length} din ${d.episodes.length} episoade`
+                    : d.watchedByMe
+                      ? d.watchedByMeAt
+                        ? `Ai văzut acest titlu · ${addedDate(d.watchedByMeAt)}`
+                        : "Ai văzut acest titlu"
+                      : "Nu ai văzut acest titlu"}
                 </span>
               </div>
 
@@ -389,55 +494,161 @@ export function TitleDetailDrawer({
                 </div>
               )}
 
-              <div className="flex flex-col gap-2 pt-1 border-t border-border">
-                {d.torrentHash ? (
-                  d.canManage ? (
-                    d.status === "downloading" ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onRequestDelete({
-                            mediaId: d.mediaId,
-                            title: d.type === "movie" ? d.title : (d.show ?? d.title),
-                            isSeasonPack: d.isSeasonPack,
-                            isCancel: true,
-                          })
-                        }
-                        className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-border bg-muted/40 py-2 text-xs font-medium text-red-400 hover:bg-red-500/10 transition-colors"
-                      >
-                        <XCircle className="h-3.5 w-3.5" />
-                        Anulare
-                      </button>
-                    ) : (
-                      <>
-                        <div className="flex gap-2 pt-2">
+              {d.type === "tv_show" && (
+                <>
+                  {/* Urmărirea episoadelor noi. Ascunsă pentru serialele
+                      încheiate — n-au ce episoade noi să primească. */}
+                  {d.tvStatus !== "Ended" && d.canManage && (
+                    <div className="rounded-xl border border-border bg-muted/30 p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Radar
+                          className={`h-4 w-4 shrink-0 ${d.autoDownload ? "text-violet-400" : "text-muted-foreground"}`}
+                        />
+                        <span className="flex-1 text-xs font-medium">
+                          {d.autoDownload ? "Urmărit" : "Urmărește episoade noi"}
+                        </span>
+                        {d.autoDownload ? (
                           <button
                             type="button"
-                            onClick={correctSubtitle}
-                            disabled={correcting}
-                            className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-border bg-muted/40 py-2 text-xs font-medium text-foreground hover:bg-muted/60 transition-colors disabled:opacity-40"
+                            onClick={() => toggleWatch(false)}
+                            disabled={savingWatch}
+                            className="rounded-lg border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 disabled:opacity-40"
                           >
-                            {correcting ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <Captions className="h-3.5 w-3.5" />
-                            )}
-                            Corectează subtitrare
+                            Oprește
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setPickingWatch((v) => !v)}
+                            disabled={savingWatch}
+                            className="rounded-lg bg-primary px-2 py-1 text-[11px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+                          >
+                            Pornește
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Alegerea punctului de pornire e explicită, nu
+                          implicită: pentru un serial din care ai doar primele
+                          sezoane, "recuperează tot" înseamnă zeci de episoade
+                          descărcate deodată — trebuie să fie o decizie luată
+                          în cunoștință de cauză, nu un efect secundar. */}
+                      {pickingWatch && !d.autoDownload && (
+                        <div className="space-y-1.5">
+                          <button
+                            type="button"
+                            onClick={() => toggleWatch(true, "forward")}
+                            className="w-full rounded-lg bg-muted/60 px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-muted"
+                          >
+                            <span className="block font-medium text-foreground">
+                              Doar de acum înainte
+                            </span>
+                            <span className="block text-muted-foreground">
+                              Descarcă episoadele care apar din acest moment
+                            </span>
                           </button>
                           <button
                             type="button"
-                            onClick={deleteSubtitle}
-                            disabled={deletingSubtitle}
-                            className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-border bg-muted/40 py-2 text-xs font-medium text-foreground hover:bg-muted/60 transition-colors disabled:opacity-40"
+                            onClick={() => toggleWatch(true, "backfill")}
+                            className="w-full rounded-lg bg-muted/60 px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-muted"
                           >
-                            {deletingSubtitle ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <CaptionsOff className="h-3.5 w-3.5" />
-                            )}
-                            Șterge subtitrare
+                            <span className="block font-medium text-foreground">
+                              Recuperează și ce lipsește
+                            </span>
+                            <span className="block text-muted-foreground">
+                              Descarcă și episoadele difuzate pe care nu le ai
+                            </span>
                           </button>
                         </div>
+                      )}
+
+                      {d.autoDownload && (
+                        <>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-muted-foreground">Calitate</span>
+                            <select
+                              value={d.autoDownloadQuality ?? "1080p"}
+                              onChange={(e) => setWatchQuality(e.target.value)}
+                              disabled={savingWatch}
+                              className="rounded-lg border border-border bg-muted/40 px-1.5 py-0.5 text-[11px] outline-none focus:ring-1 focus:ring-primary"
+                            >
+                              {["4K HDR", "4K", "1080p", "720p", "SD"].map((q) => (
+                                <option key={q} value={q}>
+                                  {q}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={checkNow}
+                              disabled={checkingNow}
+                              className="ml-auto flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted/60 disabled:opacity-40"
+                            >
+                              {checkingNow ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <RefreshCw className="h-3 w-3" />
+                              )}
+                              Verifică acum
+                            </button>
+                          </div>
+                          <div className="text-[10px] text-muted-foreground">
+                            {d.autoDownloadFrom
+                              ? `De după ${d.autoDownloadFrom}. `
+                              : "Recuperează tot ce lipsește. "}
+                            {d.watchLastCheckedAt
+                              ? `Verificat ultima dată ${addedDate(Math.floor(new Date(`${d.watchLastCheckedAt.replace(" ", "T")}Z`).getTime() / 1000))}.`
+                              : "Încă neverificat."}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    {groupBySeason(d.episodes).map((group) => (
+                      <div key={group.season ?? "x"}>
+                        <div className="mb-1 flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
+                          {group.season != null ? `Sezonul ${group.season}` : "Fără sezon"}
+                          <span className="text-[10px] font-normal">
+                            {group.episodes.length}{" "}
+                            {group.episodes.length === 1 ? "episod" : "episoade"}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1 sm:grid-cols-3">
+                          {group.episodes.map((ep) => (
+                            <button
+                              key={ep.mediaId}
+                              type="button"
+                              onClick={() => setOpenEpisodeId(ep.mediaId)}
+                              className="flex items-center gap-1.5 rounded-lg bg-muted/40 px-2 py-1.5 text-left transition-all hover:bg-muted/60 active:scale-[0.99]"
+                            >
+                              {ep.status === "in_library" ? (
+                                ep.watchedByMe ? (
+                                  <Eye className="h-3 w-3 shrink-0 text-emerald-400" />
+                                ) : (
+                                  <EyeOff className="h-3 w-3 shrink-0 text-muted-foreground" />
+                                )
+                              ) : (
+                                <CircleDashed className="h-3 w-3 shrink-0 animate-pulse text-blue-400" />
+                              )}
+                              <span className="min-w-0 flex-1 truncate text-[11px]">
+                                {episodeCode(ep.season, ep.episode) ?? "—"}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {d.type !== "tv_show" && (
+                <div className="flex flex-col gap-2 pt-1 border-t border-border">
+                  {d.torrentHash ? (
+                    d.canManage ? (
+                      d.status === "downloading" ? (
                         <button
                           type="button"
                           onClick={() =>
@@ -445,30 +656,76 @@ export function TitleDetailDrawer({
                               mediaId: d.mediaId,
                               title: d.type === "movie" ? d.title : (d.show ?? d.title),
                               isSeasonPack: d.isSeasonPack,
-                              isCancel: false,
+                              isCancel: true,
                             })
                           }
                           className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-border bg-muted/40 py-2 text-xs font-medium text-red-400 hover:bg-red-500/10 transition-colors"
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Șterge titlul complet
+                          <XCircle className="h-3.5 w-3.5" />
+                          Anulare
                         </button>
-                      </>
+                      ) : (
+                        <>
+                          <div className="flex gap-2 pt-2">
+                            <button
+                              type="button"
+                              onClick={correctSubtitle}
+                              disabled={correcting}
+                              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-border bg-muted/40 py-2 text-xs font-medium text-foreground hover:bg-muted/60 transition-colors disabled:opacity-40"
+                            >
+                              {correcting ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Captions className="h-3.5 w-3.5" />
+                              )}
+                              Corectează subtitrare
+                            </button>
+                            <button
+                              type="button"
+                              onClick={deleteSubtitle}
+                              disabled={deletingSubtitle}
+                              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-border bg-muted/40 py-2 text-xs font-medium text-foreground hover:bg-muted/60 transition-colors disabled:opacity-40"
+                            >
+                              {deletingSubtitle ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <CaptionsOff className="h-3.5 w-3.5" />
+                              )}
+                              Șterge subtitrare
+                            </button>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onRequestDelete({
+                                mediaId: d.mediaId,
+                                title: d.type === "movie" ? d.title : (d.show ?? d.title),
+                                isSeasonPack: d.isSeasonPack,
+                                isCancel: false,
+                              })
+                            }
+                            className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-border bg-muted/40 py-2 text-xs font-medium text-red-400 hover:bg-red-500/10 transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Șterge titlul complet
+                          </button>
+                        </>
+                      )
+                    ) : (
+                      <div className="pt-2 text-[11px] text-muted-foreground">
+                        Doar {d.addedByUsername ?? "cel care a adăugat titlul"} sau un admin poate
+                        corecta/șterge subtitrarea sau șterge titlul.
+                      </div>
                     )
                   ) : (
                     <div className="pt-2 text-[11px] text-muted-foreground">
-                      Doar {d.addedByUsername ?? "cel care a adăugat titlul"} sau un admin poate
-                      corecta/șterge subtitrarea sau șterge titlul.
+                      Nu știm ce torrent corespunde acestui titlu (a fost adăugat manual în Plex,
+                      sau torrentul nu mai există în qBittorrent) — corectarea/ștergerea subtitrării
+                      și ștergerea completă nu sunt disponibile.
                     </div>
-                  )
-                ) : (
-                  <div className="pt-2 text-[11px] text-muted-foreground">
-                    Nu știm ce torrent corespunde acestui titlu (a fost adăugat manual în Plex, sau
-                    torrentul nu mai există în qBittorrent) — corectarea/ștergerea subtitrării și
-                    ștergerea completă nu sunt disponibile.
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>

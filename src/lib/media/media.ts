@@ -6,7 +6,10 @@
 
 import { getDb } from "../db";
 
-export type AddedVia = "wizard" | "manual" | "backfill";
+// "auto" = pornit de urmărirea serialelor (show-watch.ts), fără intervenție
+// umană — singurul caz în care un torrent apare în bibliotecă fără ca cineva
+// să fi apăsat ceva, deci merită deosebit în notificări.
+export type AddedVia = "wizard" | "manual" | "backfill" | "auto";
 
 export interface UpsertMediaEntryInput {
   mediaType: "movie" | "episode";
