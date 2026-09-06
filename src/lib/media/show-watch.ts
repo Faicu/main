@@ -109,10 +109,15 @@ export async function checkShow(showId: number): Promise<ShowWatchOutcome> {
     )
     .get(showId) as unknown as ShowRow | undefined;
 
+  // datetime('now'), nu new Date().toISOString(): restul coloanelor de timp
+  // din `media` sunt în formatul SQLite ("2026-09-06 07:54:16"), iar un ISO
+  // complet ("...T07:54:16.987Z") strica două lucruri deodată. Afișarea —
+  // conversia standard din UI îi mai adăuga un "Z" și ieșea dată invalidă.
+  // Și, mai grav, programarea: comparația din checkDueShows e pe șiruri, iar
+  // 'T' (84) > ' ' (32), deci un serial verificat azi nu devenea scadent în
+  // aceeași zi oricâte ore treceau — urmărirea rula o dată pe zi, nu la 3 ore.
   const stamp = () =>
-    db
-      .prepare("UPDATE media SET watch_last_checked_at = ? WHERE id = ?")
-      .run(new Date().toISOString(), showId);
+    db.prepare("UPDATE media SET watch_last_checked_at = datetime('now') WHERE id = ?").run(showId);
 
   if (!row)
     return { showId, title: "?", missing: [], downloaded: [], skipped: "serial inexistent" };

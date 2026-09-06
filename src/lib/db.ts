@@ -668,5 +668,25 @@ function applyCleanups(database: DatabaseSync): void {
       }
       database.exec("PRAGMA user_version = 20");
     }
+
+    if (version < 21) {
+      // v21: watch_last_checked_at era scris cu new Date().toISOString(), în
+      // timp ce toate celelalte coloane de timp din `media` folosesc formatul
+      // SQLite. Valorile deja scrise trebuie aduse la același format, altfel
+      // rămân invizibile în UI (dată invalidă) și, mai grav, ies din
+      // comparația de scadență din checkDueShows, care e lexicografică.
+      const fixed = database
+        .prepare(
+          `UPDATE media
+              SET watch_last_checked_at =
+                    replace(substr(watch_last_checked_at, 1, 19), 'T', ' ')
+            WHERE watch_last_checked_at LIKE '%T%'`,
+        )
+        .run();
+      if (fixed.changes > 0) {
+        console.log(`[db] Migrare v21: normalizate ${fixed.changes} watch_last_checked_at`);
+      }
+      database.exec("PRAGMA user_version = 21");
+    }
   }
 }
