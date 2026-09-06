@@ -361,11 +361,16 @@ export function AddMediaWizard({
     };
   }
 
+  // Nu atinge `busy` — apelantul îl deține. downloadBulk cheamă funcția asta
+  // în serie, iar cât timp ea își făcea singură setBusy(true)/finally
+  // setBusy(false), primul element terminat deblocheze tot wizard-ul în
+  // mijlocul lotului: butoanele redeveneau active și dialogul se putea
+  // închide (`onOpenChange` se uită tot la `busy`), deși restul descărcărilor
+  // încă porneau una câte una.
   async function downloadNow(
     torrent: FilelistTorrent,
     opts: { season: number | null; episode: number | null; isSeasonPack: boolean },
   ) {
-    setBusy(true);
     setDownloadingTorrentId(torrent.id);
     const toastId = toast.loading(`Se descarcă: ${torrent.name}…`);
     try {
@@ -401,7 +406,6 @@ export function AddMediaWizard({
       });
       return false;
     } finally {
-      setBusy(false);
       setDownloadingTorrentId(null);
     }
   }
@@ -410,9 +414,14 @@ export function AddMediaWizard({
     torrent: FilelistTorrent,
     opts: { season: number | null; episode: number | null; isSeasonPack: boolean },
   ) {
-    if (await downloadNow(torrent, opts)) {
-      setDoneMessage(`„${torrent.name}” a fost adăugat în qBittorrent.`);
-      setStep("done");
+    setBusy(true);
+    try {
+      if (await downloadNow(torrent, opts)) {
+        setDoneMessage(`„${torrent.name}” a fost adăugat în qBittorrent.`);
+        setStep("done");
+      }
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -423,15 +432,20 @@ export function AddMediaWizard({
   async function downloadBulk(items: BulkDownloadItem[]) {
     setBusy(true);
     let okCount = 0;
-    for (const item of items) {
-      const success = await downloadNow(item.torrent, {
-        season: item.season,
-        episode: item.episode ?? null,
-        isSeasonPack: item.isSeasonPack,
-      });
-      if (success) okCount++;
+    try {
+      for (const item of items) {
+        const success = await downloadNow(item.torrent, {
+          season: item.season,
+          episode: item.episode ?? null,
+          isSeasonPack: item.isSeasonPack,
+        });
+        if (success) okCount++;
+      }
+    } finally {
+      // finally, ca o excepție neprevăzută să nu lase wizard-ul blocat pe
+      // "busy" la nesfârșit, fără nicio cale de închidere.
+      setBusy(false);
     }
-    setBusy(false);
     if (okCount > 0) {
       toast.success(`${okCount}/${items.length} descărcări adăugate în qBittorrent`);
       setDoneMessage(`${okCount}/${items.length} descărcări adăugate în qBittorrent.`);

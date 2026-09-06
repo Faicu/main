@@ -411,7 +411,14 @@ export function getMediaDisplayByTorrentHash(torrentHash: string): {
 } | null {
   const row = getDb()
     .prepare(
-      "SELECT title, poster_path, season, episode, is_season_pack FROM media WHERE torrent_hash = ? LIMIT 1",
+      // ORDER BY, nu doar LIMIT 1: cât timp un pachet de sezon se desface,
+      // rândul-pachet coexistă cu episoadele extrase din el, toate pe același
+      // hash. Etichetăm o acțiune pe întreg torrentul cu "Sezonul N", deci
+      // rândul-pachet are prioritate — fără ordonare, alegerea depindea de
+      // ordinea implicită de scanare și notificarea putea numi un episod
+      // oarecare din pachet.
+      `SELECT title, poster_path, season, episode, is_season_pack FROM media
+         WHERE torrent_hash = ? ORDER BY is_season_pack DESC, id LIMIT 1`,
     )
     .get(torrentHash) as
     | {

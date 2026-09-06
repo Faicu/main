@@ -112,12 +112,21 @@ export function TitleDetailDrawer({
     // Progres live cât timp titlul e în descărcare sau în așteptarea
     // indexării Plex — se oprește automat când trece la "in_library" (vezi
     // și plexLibraryBrowseQuery).
+    //
+    // Serialele merg pe un puls mult mai lent, din două motive. Întâi, n-au
+    // ce câștiga din cel rapid: buildDetailFromMediaRow calculează progresul
+    // qBittorrent doar pentru filme/episoade, deci pentru un serial cele
+    // 2.5s reinterogau ceva ce se schimbă abia când Plex indexează un episod
+    // — o chestiune de minute. Apoi, statusul unui serial e agregat din
+    // episoadele lui și rămâne "downloading" cât timp măcar unul n-a ajuns
+    // în Plex: un episod blocat definitiv (torrent șters din qBittorrent)
+    // ținea pulsul de 2.5s pornit la nesfârșit, cât timp drawer-ul e deschis.
     refetchInterval: (query) => {
       const d = query.state.data;
-      return d?.status === "ok" &&
-        (d.detail.status === "downloading" || d.detail.status === "processing")
-        ? 2500
-        : false;
+      if (d?.status !== "ok") return false;
+      const { status, type } = d.detail;
+      if (status !== "downloading" && status !== "processing") return false;
+      return type === "tv_show" ? 15_000 : 2500;
     },
   });
   const d = detail.data?.status === "ok" ? detail.data.detail : null;
@@ -152,8 +161,20 @@ export function TitleDetailDrawer({
     setSavingWatch(true);
     // Schimbarea calității pe un serial deja urmărit nu trebuie să mute
     // punctul de pornire înapoi — de-aia "backfill" nu apare aici.
-    await setShowWatchFn({ data: { mediaId: d.mediaId, enabled: true, quality } }).catch(() => {});
+    //
+    // Eroarea se raportează, ca la toggleWatch de mai sus: setShowWatchCore
+    // întoarce {ok:false} și când n-ai drepturi pe serial, iar varianta veche
+    // (`.catch(() => {})`, fără să se uite la rezultat) o înghițea complet —
+    // calitatea părea schimbată până la următorul refetch, care o dădea
+    // înapoi fără nicio explicație.
+    const res = await setShowWatchFn({
+      data: { mediaId: d.mediaId, enabled: true, quality },
+    }).catch((e) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }));
     setSavingWatch(false);
+    if (!res.ok) {
+      toast.error("Nu am putut schimba calitatea", { description: res.error });
+      return;
+    }
     invalidateAfterMutation();
   }
 
