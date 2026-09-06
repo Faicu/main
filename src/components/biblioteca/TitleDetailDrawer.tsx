@@ -297,12 +297,18 @@ export function TitleDetailDrawer({
                 {d.status !== "in_library" && (
                   <StatusBadge status={d.status} progress={d.progress} />
                 )}
-                {d.quality && (
+                {/* Calitatea, audio/subtitrarea și durata sunt proprietăți ale
+                    unui FIȘIER. Rândul-părinte 'tv_show' nu are fișier, deci
+                    coloanele lui sunt goale prin construcție — iar
+                    has_romanian_subtitle = 0 pe el nu înseamnă "fără
+                    subtitrare RO", ci "întrebare fără sens la nivel de
+                    serial". Se aplică per episod, nu aici. */}
+                {d.type !== "tv_show" && d.quality && (
                   <span className="rounded-full bg-amber-500/15 text-amber-400 px-2 py-0.5 font-medium">
                     {d.quality}
                   </span>
                 )}
-                {d.hasRomanianAudio ? (
+                {d.type === "tv_show" ? null : d.hasRomanianAudio ? (
                   <span className="flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-400 px-2 py-0.5 font-medium">
                     <Flag className="h-3 w-3" />
                     Românesc
