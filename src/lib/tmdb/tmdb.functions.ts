@@ -31,6 +31,7 @@ interface TmdbApiGenre {
 interface TmdbApiMovie {
   title?: string;
   original_title?: string;
+  original_language?: string;
   overview?: string | null;
   release_date?: string | null;
   external_ids?: { imdb_id?: string | null };
@@ -49,6 +50,7 @@ interface TmdbApiSeasonSummary {
 interface TmdbApiTvShow {
   name?: string;
   original_name?: string;
+  original_language?: string;
   overview?: string | null;
   external_ids?: { imdb_id?: string | null };
   first_air_date?: string | null;
@@ -180,6 +182,20 @@ export interface TmdbDetails {
   posterUrl: string | null;
 }
 
+// Când numele din TMDB pe ro-RO coincide cu cel original, de obicei înseamnă
+// că traducerea lipsește, iar un titlu alternativ marcat "RO" e mai bun. NU și
+// pentru producțiile românești: acolo numele original ESTE cel românesc, iar
+// titlul alternativ RO e de regulă varianta internațională — adică exact
+// invers decât vrem. Găsit la "Insula Iubirii" (limba originală: ro), pe care
+// regula veche îl redenumea în "Temptation Island – Insula iubirii".
+function shouldTryRomanianAka(
+  title: string,
+  originalTitle: string | undefined,
+  lang: string | undefined,
+): boolean {
+  return !!title && title === originalTitle?.trim() && lang !== "ro";
+}
+
 // Versiune internă (fără createServerFn) — folosită și din plex-browse.ts,
 // care are nevoie de detaliile TMDB (overview RO, genuri, imdbId) pentru
 // pagina Bibliotecă, fără să treacă prin granița de server function.
@@ -198,7 +214,7 @@ export async function getTmdbDetailsInternal(
         overview = enMovie?.overview?.trim() || null;
       }
       let title = movie.title?.trim() || movie.original_title?.trim() || "";
-      if (title && title === movie.original_title?.trim()) {
+      if (shouldTryRomanianAka(title, movie.original_title, movie.original_language)) {
         const { findRomanianAkaTitle } = await import("./tmdb-title-lookup");
         title = (await findRomanianAkaTitle("movie", id)) || title;
       }
@@ -227,7 +243,7 @@ export async function getTmdbDetailsInternal(
         overview = enShow?.overview?.trim() || null;
       }
       let title = show.name?.trim() || show.original_name?.trim() || "";
-      if (title && title === show.original_name?.trim()) {
+      if (shouldTryRomanianAka(title, show.original_name, show.original_language)) {
         const { findRomanianAkaTitle } = await import("./tmdb-title-lookup");
         title = (await findRomanianAkaTitle("tv", id)) || title;
       }
