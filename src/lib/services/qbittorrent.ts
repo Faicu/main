@@ -60,9 +60,13 @@ export const qbitAction = createServerFn({ method: "POST" })
         // Categoria qBittorrent a fiecărui torrent ("filme"/"seriale", setată
         // la descărcare — vezi download.ts) ne spune ce bibliotecă Plex să
         // rescanăm; o citim ÎNAINTE de ștergere, cât încă există torrentul.
+        // encodeURIComponent: hash-urile vin de la client, iar aici (spre
+        // deosebire de qbitPostForm, care trece prin URLSearchParams) ajung
+        // brut într-un query string — un "&" într-un hash ar fi adăugat
+        // parametri proprii cererii către qBittorrent.
         const categoriesBeforeDelete = await qbitGet(
           url,
-          `/api/v2/torrents/info?hashes=${hashesStr}`,
+          `/api/v2/torrents/info?hashes=${encodeURIComponent(hashesStr)}`,
           user,
           pass,
         )

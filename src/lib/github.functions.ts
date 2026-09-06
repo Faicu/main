@@ -53,6 +53,25 @@ interface GitHubApiCommit {
 
 const GITHUB_REPO = process.env.GITHUB_REPO ?? "Faicu/FaikkitBox";
 
+// Un SHA de git e hex, atât. Validarea NU e cosmetică: `data.sha` ajunge
+// argument pentru `git show`, iar execFileSync nu folosește shell, deci nu
+// există injecție de shell — dar există injecție de ARGUMENT. `git show`
+// acceptă opțiunile de diff, printre care `--output=<fișier>`: un sha de
+// forma "--output=/root/.ssh/authorized_keys" scrie liniștit în calea aia.
+// Serviciul rulează ca root, deci era o scriere arbitrară de fișier ca root,
+// pornind de la o sesiune de admin — exact genul de acces pe care restul
+// aplicației îl evită cu grijă (vezi lista albă din runAgentCommand, unde
+// argumentele nu vin niciodată de la client).
+//
+// Verificat pe repo-ul ăsta: `git show --numstat --format= --output=/tmp/x`
+// chiar creează /tmp/x.
+const SHA_RE = /^[0-9a-f]{7,40}$/i;
+
+function assertValidSha(sha: string): string {
+  if (!SHA_RE.test(sha)) throw new Error("SHA invalid");
+  return sha;
+}
+
 function githubHeaders(): Record<string, string> {
   const h: Record<string, string> = {
     Accept: "application/vnd.github+json",
@@ -163,15 +182,24 @@ export const getCommitsFromDb = createServerFn({ method: "GET" }).handler(
 
 // Detalii complete pentru un commit — live de pe GitHub, la cerere
 export const getCommitDetail = createServerFn({ method: "GET" })
-  .validator((data: { sha: string }) => data)
+  .validator((data: { sha: string }) => {
+    assertValidSha(data.sha);
+    return data;
+  })
   .handler(async ({ data }): Promise<GitHubCommitDetail> => {
     const { requireAdmin } = await import("./auth/admin.server");
     await requireAdmin();
     try {
-      const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/commits/${data.sha}`, {
-        headers: githubHeaders(),
-        signal: AbortSignal.timeout(8000),
-      });
+      // encodeURIComponent în plus față de validare: sha e interpolat într-o
+      // cale de URL, iar validarea singură e ușor de slăbit din greșeală mai
+      // târziu.
+      const res = await fetch(
+        `https://api.github.com/repos/${GITHUB_REPO}/commits/${encodeURIComponent(data.sha)}`,
+        {
+          headers: githubHeaders(),
+          signal: AbortSignal.timeout(8000),
+        },
+      );
       if (!res.ok) throw new Error(`GitHub API a răspuns ${res.status}`);
       const c: GitHubApiCommit = await res.json();
 
@@ -330,25 +358,42 @@ export const getUnpushedCommits = createServerFn({ method: "GET" }).handler(
 // Detalii complete pentru un commit local (nepublicat încă pe GitHub) — citite
 // direct din git, fiindcă GitHub API nu are cum să știe de el.
 export const getLocalCommitDetail = createServerFn({ method: "GET" })
-  .validator((data: { sha: string }) => data)
+  .validator((data: { sha: string }) => {
+    assertValidSha(data.sha);
+    return data;
+  })
   .handler(async ({ data }): Promise<GitHubCommitDetail> => {
     const { requireAdmin } = await import("./auth/admin.server");
     await requireAdmin();
     try {
       const sep = "\x1f";
+      // `--end-of-options` peste validarea din validator: de aici încolo git
+      // tratează orice urmează ca revizie, nu ca opțiune, chiar dacă cineva
+      // slăbește cândva regexul. Două straturi, fiindcă greșeala aici scrie
+      // fișiere ca root (vezi SHA_RE).
       const header = execFileSync(
         "git",
-        ["show", "-s", `--pretty=format:%H${sep}%h${sep}%B${sep}%an${sep}%aI`, data.sha],
+        [
+          "show",
+          "-s",
+          `--pretty=format:%H${sep}%h${sep}%B${sep}%an${sep}%aI`,
+          "--end-of-options",
+          data.sha,
+        ],
         { encoding: "utf8" },
       );
       const [sha, shortSha, message, author, date] = header.split(sep);
 
-      const numstat = execFileSync("git", ["show", "--numstat", "--format=", data.sha], {
-        encoding: "utf8",
-      }).trim();
-      const nameStatus = execFileSync("git", ["show", "--name-status", "--format=", data.sha], {
-        encoding: "utf8",
-      }).trim();
+      const numstat = execFileSync(
+        "git",
+        ["show", "--numstat", "--format=", "--end-of-options", data.sha],
+        { encoding: "utf8" },
+      ).trim();
+      const nameStatus = execFileSync(
+        "git",
+        ["show", "--name-status", "--format=", "--end-of-options", data.sha],
+        { encoding: "utf8" },
+      ).trim();
       const statusByFile = new Map<string, string>();
       for (const line of nameStatus ? nameStatus.split("\n") : []) {
         const [code, filename] = line.split("\t");
