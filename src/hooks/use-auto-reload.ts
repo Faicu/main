@@ -7,9 +7,16 @@ export function useAutoReload() {
 
   useEffect(() => {
     let es: EventSource | null = null;
+    // Reconectarea e amânată cu setTimeout, deci poate rămâne în așteptare
+    // când efectul se curăță. Fără să-l reținem, timeout-ul deschidea după
+    // demontare un EventSource nou pe care cleanup-ul (care capturase deja
+    // instanța veche) nu-l mai putea închide — o conexiune SSE scursă, care
+    // ține și serverul să nu se oprească curat.
+    let reconnectId: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
 
     function connect() {
-      if (firedRef.current) return;
+      if (firedRef.current || cancelled) return;
       es = new EventSource("/api/deploy-sha");
 
       es.onmessage = (ev) => {
@@ -30,12 +37,15 @@ export function useAutoReload() {
 
       es.onerror = () => {
         es?.close();
-        setTimeout(connect, 2000);
+        if (cancelled) return;
+        reconnectId = setTimeout(connect, 2000);
       };
     }
 
     connect();
     return () => {
+      cancelled = true;
+      if (reconnectId !== undefined) clearTimeout(reconnectId);
       es?.close();
     };
   }, []);

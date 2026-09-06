@@ -9,12 +9,22 @@ export default function () {
   // decât dacă chiar există rânduri nelegate).
   const INTERVAL_MS = 10 * 60_000;
 
+  // Gardă de suprapunere: fiecare hash nelegat înseamnă câteva cereri către
+  // Plex, deci o rulare cu multe rânduri în așteptare poate depăși intervalul.
+  // Două rulări simultane ar încerca să desfacă același pachet de sezon în
+  // paralel, dublând rândurile de episod pe care le creează.
+  let running = false;
+
   async function run() {
+    if (running) return;
+    running = true;
     try {
       const { reconcilePlexLinks } = await import("../../src/lib/media/plex-link-reconciler");
       await reconcilePlexLinks();
     } catch (e) {
       console.warn("[plex-reconcile] Rulare eșuată:", e);
+    } finally {
+      running = false;
     }
   }
 

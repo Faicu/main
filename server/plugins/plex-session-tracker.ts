@@ -39,8 +39,14 @@ export default function () {
       await trackPlexSessions(
         sessionsMd.map((s) => {
           const dur = Number(s.duration ?? 0);
-          const rawOff = Number(s.viewOffset ?? 0);
-          const off = dur > 1000 && rawOff > 0 && rawOff < 1000 ? rawOff * 1000 : rawOff;
+          // viewOffset de la Plex e mereu în milisecunde. Aici exista o
+          // conversie care înmulțea cu 1000 orice offset sub 1000, presupunând
+          // secunde — dar asta lovea exact cazul legitim al unei redări abia
+          // pornite: 500 ms (o jumătate de secundă) devenea 500 000 ms, adică
+          // 8 minute. Peste pragul MIN_PROGRESS_MS din activity-log.ts, deci o
+          // vizionare pornită și oprită imediat scria în "Vizionări recente" o
+          // intrare falsă, cu progres inventat.
+          const off = Number(s.viewOffset ?? 0);
           return {
             user: s.User?.title ?? "unknown",
             title: s.title ?? "",

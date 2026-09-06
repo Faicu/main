@@ -448,9 +448,16 @@ export function deleteMediaByTorrentHash(torrentHash: string): void {
 // să oprească reîncercările.
 export async function resolveMediaPlexLinkByTorrentHash(torrentHash: string): Promise<boolean> {
   const db = getDb();
+  // Un hash poate acoperi mai multe rânduri: pachetul de sezon în curs de
+  // desfacere coexistă cu episoadele deja extrase din el (vezi
+  // resolveSeasonPackPlexLinks). Luăm întâi un rând NElegat — altfel
+  // rezultatul ar depinde de ordinea implicită de scanare a tabelei, iar un
+  // rând deja legat ar masca pachetul care încă are treabă.
   const row = db
     .prepare(
-      "SELECT id, media_type, title, original_title, season, episode FROM media WHERE torrent_hash = ?",
+      `SELECT id, media_type, title, original_title, season, episode, plex_rating_key
+         FROM media WHERE torrent_hash = ?
+        ORDER BY plex_rating_key IS NOT NULL, id LIMIT 1`,
     )
     .get(torrentHash) as
     | {
@@ -460,9 +467,13 @@ export async function resolveMediaPlexLinkByTorrentHash(torrentHash: string): Pr
         original_title: string | null;
         season: number | null;
         episode: number | null;
+        plex_rating_key: string | null;
       }
     | undefined;
   if (!row) return false;
+  // Nu mai există niciun rând nelegat pentru hash-ul ăsta — treaba e gata,
+  // apelantul poate opri reîncercările.
+  if (row.plex_rating_key) return true;
 
   const { findPlexMovieLink, findPlexEpisodeLink } = await import("../services/plex-library");
   const link =
@@ -515,6 +526,30 @@ interface SeasonPackMediaRow {
   subtitle_checked_at: string | null;
 }
 
+// Câte episoade difuzate are sezonul, după TMDB — reperul față de care
+// decidem dacă Plex a terminat de indexat pachetul. Întoarce null când nu
+// putem ști (fără tmdb_id, sau TMDB indisponibil); apelantul tratează
+// necunoscutul ca "acceptă ce e", nu ca "mai așteaptă la nesfârșit".
+async function airedEpisodeCountForSeason(
+  tmdbId: number | null,
+  season: number,
+): Promise<number | null> {
+  if (tmdbId == null) return null;
+  const { getTmdbAllSeasonsInternal } = await import("../tmdb/tmdb.functions");
+  const schema = await getTmdbAllSeasonsInternal(tmdbId, [season]).catch(() => []);
+  const found = schema.find((s) => s.seasonNumber === season);
+  if (!found) return null;
+  const aired = found.episodes.filter((e) => e.aired).length;
+  return aired > 0 ? aired : null;
+}
+
+// Cât mai așteptăm ca Plex să termine de indexat un pachet, înainte să
+// acceptăm ca final ce a indexat până acum. Peste prag, diferența nu mai e
+// "Plex încă scanează", ci un pachet chiar incomplet (uploader care a pus 8
+// din 10 episoade) — iar acolo a insista la nesfârșit ar lăsa rândul blocat
+// pe "Se procesează în Plex" până la expirarea ferestrei reconcilierului.
+const SEASON_PACK_INDEX_GRACE_MS = 2 * 60 * 60 * 1000;
+
 // Echivalentul lui resolveMediaPlexLinkByTorrentHash, pentru pachete de
 // sezon (rândul are episode NULL, is_season_pack = 1 — vezi upsertMediaEntry,
 // apelat o singură dată per torrent, indiferent dacă e episod sau pachet).
@@ -523,8 +558,21 @@ interface SeasonPackMediaRow {
 // mereu). Aici desfacem pachetul: pentru fiecare episod găsit deja în Plex,
 // clonăm rândul-pachet într-un rând de episod normal (sau actualizăm unul
 // deja existent, dacă episodul fusese descărcat separat înainte), apoi ștergem
-// placeholder-ul de pachet. Întoarce true dacă a găsit și desfăcut cel puțin
-// un episod, ca apelantul (pollUntilComplete) să oprească reîncercările.
+// placeholder-ul de pachet.
+//
+// Desfacerea e în două trepte, fiindcă indexarea Plex e asincronă ȘI
+// per-fișier: findPlexSeasonLinks întoarce ce există în acel moment, adică
+// frecvent 2-3 episoade dintr-un pachet de 10. Varianta veche ștergea rândul-
+// pachet la primul episod găsit și întorcea true, ceea ce oprea definitiv
+// reîncercările (pollUntilComplete face break, iar reconcilierul caută doar
+// rânduri cu plex_rating_key NULL). Restul episoadelor rămâneau pe disc și în
+// Plex, dar fără rând în `media`: invizibile în Bibliotecă și raportate ca
+// "lipsă" de show-watch, care le redescărca individual.
+//
+// Acum sincronizăm ce s-a găsit la fiecare trecere (idempotent — findExisting
+// le regăsește și le actualizează), dar ștergem rândul-pachet și raportăm
+// succes doar când sezonul e acoperit complet, sau când a trecut fereastra de
+// grație. Până atunci întoarcem false, deci apelantul reîncearcă.
 export async function resolveSeasonPackPlexLinks(torrentHash: string): Promise<boolean> {
   const db = getDb();
   const row = db
@@ -538,6 +586,15 @@ export async function resolveSeasonPackPlexLinks(torrentHash: string): Promise<b
   const { findPlexSeasonLinks } = await import("../services/plex-library");
   const links = await findPlexSeasonLinks(row.title, row.season);
   if (!links || links.size === 0) return false;
+
+  const expected = await airedEpisodeCountForSeason(row.tmdb_id, row.season);
+  // completed_at e în formatul SQLite ("2026-09-06 07:54:16", UTC) — același
+  // tratament ca în plex-browse.ts la conversia spre timestamp.
+  const completedMs = row.completed_at
+    ? new Date(`${row.completed_at.replace(" ", "T")}Z`).getTime()
+    : null;
+  const graceExpired = completedMs == null || Date.now() - completedMs > SEASON_PACK_INDEX_GRACE_MS;
+  const isComplete = expected == null || links.size >= expected || graceExpired;
 
   const insert = db.prepare(
     `INSERT INTO media (
@@ -553,13 +610,26 @@ export async function resolveSeasonPackPlexLinks(torrentHash: string): Promise<b
     `UPDATE media SET plex_rating_key = ?, quality = ?, duration_ms = ?, plex_added_at = ?,
      updated_at = datetime('now') WHERE id = ?`,
   );
+  // `parent_id IS ?`, nu `parent_id = ?`: pentru un pachet fără părinte
+  // rezolvat, `= NULL` nu se potrivește niciodată cu sine, deci am fi
+  // reinserat la fiecare trecere rânduri pentru aceleași episoade — până la
+  // prima coliziune pe indexul unic de plex_rating_key. Același idiom ca în
+  // findExistingDownloadRow.
   const findExisting = db.prepare(
-    `SELECT id FROM media WHERE parent_id = ? AND season = ? AND episode = ? AND id != ?`,
+    `SELECT id FROM media WHERE parent_id IS ? AND season = ? AND episode = ? AND id != ?`,
   );
+  // Plasă după cheia reală de unicitate: `plex_rating_key` are index UNIQUE
+  // (vezi db.ts), iar un episod poate exista deja sub alt părinte decât cel al
+  // pachetului — descărcat separat înainte, când placeholder-ul serialului
+  // încă nu era rezolvat. Fără verificarea asta, INSERT-ul ar arunca o
+  // eroare de constrângere care ar rupe bucla la mijloc și ar lăsa restul
+  // episoadelor nelegate. Contează mai mult acum, când desfacerea parțială
+  // repetă trecerile până la acoperirea completă.
+  const findByRatingKey = db.prepare(`SELECT id FROM media WHERE plex_rating_key = ?`);
 
   for (const [episodeNum, link] of links) {
-    const existing = findExisting.get(row.parent_id, row.season, episodeNum, row.id) as
-      { id: number } | undefined;
+    const existing = (findExisting.get(row.parent_id, row.season, episodeNum, row.id) ??
+      findByRatingKey.get(link.ratingKey)) as { id: number } | undefined;
     if (existing) {
       updateExisting.run(link.ratingKey, link.quality, link.durationMs, link.addedAt, existing.id);
       continue;
@@ -589,7 +659,12 @@ export async function resolveSeasonPackPlexLinks(torrentHash: string): Promise<b
       row.freeleech,
       row.internal,
       row.save_path,
-      row.is_season_pack,
+      // 0, nu row.is_season_pack: rândul creat aici e un episod concret, cu
+      // numărul lui — a moștenit 1 de pe placeholder-ul de pachet, ceea ce
+      // însemna un rând care se declara și pachet, și episod (`seasonEpisodeLabel`
+      // din notifications.ts alege "Sezonul N" pe baza flagului, ignorând
+      // episodul). Proveniența pachetului rămâne vizibilă prin torrent_name.
+      0,
       row.added_via,
       row.requested_by_user_id,
       row.completed_at,
@@ -601,6 +676,17 @@ export async function resolveSeasonPackPlexLinks(torrentHash: string): Promise<b
       link.quality,
       link.durationMs,
     );
+  }
+
+  if (!isComplete) {
+    // Episoadele găsite până acum au deja rânduri proprii (create/actualizate
+    // mai sus). Pachetul rămâne ca marcaj de "încă se indexează": îl ține pe
+    // show-watch să nu descarce individual episoadele care oricum vin din el
+    // (pendingPackSeasons), iar reconcilierul îl reia peste 10 minute.
+    console.log(
+      `[media] Pachet sezon ${row.season} "${row.title}": ${links.size}/${expected} episoade indexate de Plex — reiau`,
+    );
+    return false;
   }
 
   db.prepare("DELETE FROM media WHERE id = ?").run(row.id);

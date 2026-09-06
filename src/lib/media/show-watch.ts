@@ -662,14 +662,29 @@ export async function refreshShowMetadata(): Promise<number> {
       MAX_META_SHOWS_PER_RUN,
     ) as unknown as Array<{ id: number; tmdb_id: number; imdb_id: string | null }>;
 
+  // Marchează încercarea chiar și când TMDB n-a răspuns. `meta_refreshed_at`
+  // se scrie altfel doar în writeShowMeta, deci un serial al cărui tmdb_id nu
+  // mai rezolvă (șters de pe TMDB, id greșit) rămânea cu NULL pe veci — iar
+  // ORDER BY-ul de mai sus pune NULL-urile primele. Cinci astfel de seriale
+  // ocupau permanent tot LIMIT-ul și blocau împrospătarea pentru TOATE
+  // celelalte, adică exact regresia pe care funcția asta există s-o prevină.
+  //
+  // Costul e că o pană TMDB trecătoare amână serialele atinse cu încă 12h.
+  // Acceptabil: cadența nu e critică, iar alternativa e înfometarea totală.
+  const touch = db.prepare("UPDATE media SET meta_refreshed_at = datetime('now') WHERE id = ?");
+
   let refreshed = 0;
   for (const row of due) {
     try {
       const details = await fetchShowDetails(row.tmdb_id);
-      if (!details) continue;
+      if (!details) {
+        touch.run(row.id);
+        continue;
+      }
       await writeShowMeta(row.id, row.imdb_id, details);
       refreshed++;
     } catch (e) {
+      touch.run(row.id);
       console.warn(`[show-watch] Metadate neactualizate pentru serialul ${row.id}:`, e);
     }
   }

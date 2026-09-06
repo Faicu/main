@@ -15,7 +15,16 @@
 
 const POLL_INTERVAL_MS = 10 * 60 * 1000; // 10 min — cât de des vedem cine a expirat
 
+// Gardă de suprapunere: o rulare atinge TMDB, TVmaze, Filelist și qBittorrent
+// pentru mai multe seriale, deci poate depăși intervalul de 10 minute.
+// checkShow are propria protecție per serial (inProgress), dar
+// fillMissingEpisodeTitles și refreshShowMetadata n-au niciuna — două rulări
+// suprapuse ar cere de două ori aceleași sezoane de la TMDB.
+let running = false;
+
 async function run(): Promise<void> {
+  if (running) return;
+  running = true;
   try {
     const { checkDueShows, fillMissingEpisodeTitles, refreshShowMetadata } =
       await import("../../src/lib/media/show-watch");
@@ -31,6 +40,8 @@ async function run(): Promise<void> {
     await checkDueShows();
   } catch (e) {
     console.warn("[show-watcher] Rulare eșuată:", e);
+  } finally {
+    running = false;
   }
 }
 

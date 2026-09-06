@@ -61,7 +61,10 @@ export async function reconcilePlexLinks(): Promise<ReconcileResult> {
     }
   }
 
-  if (linked > 0 || rows.length > 0) {
+  // rows.length > 0 e garantat aici (ieșirea devreme de mai sus acoperă
+  // restul), deci logăm doar când chiar s-a legat ceva — altfel linia asta
+  // apărea la fiecare 10 minute cât timp exista măcar un titlu în așteptare.
+  if (linked > 0) {
     console.log(
       `[plex-reconcile] ${rows.length} titluri nelegate verificate, ${linked} legate acum`,
     );
