@@ -130,23 +130,51 @@ async function writeShowMeta(
       )?.airstamp ?? null;
   }
 
-  getDb()
-    .prepare(
-      `UPDATE media
-          SET tv_status = COALESCE(?, tv_status),
-              next_episode = ?,
-              next_episode_air_date = ?,
-              next_episode_airstamp = ?,
-              meta_refreshed_at = datetime('now')
-        WHERE id = ?`,
-    )
-    .run(
-      details.tvStatus,
-      next ? formatEpisodeKey({ season: next.seasonNumber, episode: next.episodeNumber }) : null,
-      next?.airDate ?? null,
-      airstamp,
-      showId,
-    );
+  // Titlurile se împrospătează și ele. `title` (varianta de afișare, în
+  // română) și `original_title` (cea în limba originală de producție) erau
+  // scrise o singură dată, la crearea rândului, și rămâneau înghețate — iar
+  // ramura de backfill nu completa deloc original_title și year. Rezultatul
+  // s-a văzut la "The Rookie", importat din Plex pe 15 aug: title rămăsese
+  // englezescul "The Rookie" deși TMDB are "Recrutul", iar original_title era
+  // gol, deci nici titlul original nu apărea sub el.
+  //
+  // COALESCE + NULLIF: nu suprascriem cu gol dacă TMDB răspunde incomplet —
+  // mai bine un titlu vechi decât niciunul.
+  const year = details.releaseDate ? Number(details.releaseDate.slice(0, 4)) : null;
+  const db = getDb();
+  db.prepare(
+    `UPDATE media
+        SET title = COALESCE(NULLIF(?, ''), title),
+            original_title = COALESCE(NULLIF(?, ''), original_title),
+            year = COALESCE(?, year),
+            tv_status = COALESCE(?, tv_status),
+            next_episode = ?,
+            next_episode_air_date = ?,
+            next_episode_airstamp = ?,
+            meta_refreshed_at = datetime('now')
+      WHERE id = ?`,
+  ).run(
+    details.title,
+    details.originalTitle,
+    Number.isFinite(year) ? year : null,
+    details.tvStatus,
+    next ? formatEpisodeKey({ season: next.seasonNumber, episode: next.episodeNumber }) : null,
+    next?.airDate ?? null,
+    airstamp,
+    showId,
+  );
+
+  // Episoadele poartă titlul serialului, prin convenția din `media` — dacă
+  // rămâneau pe cel vechi, un episod deschis singur ar fi arătat alt nume
+  // decât serialul din care face parte. `original_title` contează în plus:
+  // e cheia de rezervă la potrivirea vizionărilor cu Plex, când istoricul
+  // vine fără ratingKey.
+  db.prepare(
+    `UPDATE media
+        SET title = COALESCE(NULLIF(?, ''), title),
+            original_title = COALESCE(NULLIF(?, ''), original_title)
+      WHERE parent_id = ?`,
+  ).run(details.title, details.originalTitle, showId);
 }
 
 export interface ShowWatchOutcome {
