@@ -587,10 +587,14 @@ export async function fillMissingEpisodeTitles(): Promise<number> {
       // (găsit la "Insula Iubirii" S10, unde TMDB n-are titluri deloc).
       // UI-ul ascunde oricum numele generice, deci nu se vede nimic urât.
       if (GENERIC_EPISODE_TITLE.test(found.title)) {
-        const airedLongAgo =
+        // Fără dată de difuzare la TMDB nu avem cum aștepta un moment anume,
+        // deci acceptăm placeholder-ul direct — altfel bucla ar fi infinită
+        // din alt motiv decât cel de mai sus. Un episod nedifuzat nici n-ar
+        // avea rând în `media`: acolo ajunge doar ce e deja descărcat.
+        const stillWorthWaiting =
           found.airDate != null &&
-          Date.now() - new Date(found.airDate).getTime() > PLACEHOLDER_GRACE_MS;
-        if (!airedLongAgo) continue;
+          Date.now() - new Date(found.airDate).getTime() <= PLACEHOLDER_GRACE_MS;
+        if (stillWorthWaiting) continue;
       }
       update.run(found.title, r.id);
       filled++;
