@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
+
+import { useFlashOnChange } from "@/hooks/use-flash-on-change";
 
 interface Props {
   label: string;
@@ -10,18 +12,9 @@ interface Props {
 
 export function StatCard({ label, value, sub, icon, accent }: Props) {
   // Micro-flash whenever the displayed value changes
-  const key = typeof value === "string" || typeof value === "number" ? String(value) : undefined;
-  const first = useRef(true);
-  const [flash, setFlash] = useState(false);
-  useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
-    }
-    setFlash(true);
-    const t = setTimeout(() => setFlash(false), 700);
-    return () => clearTimeout(t);
-  }, [key]);
+  const flash = useFlashOnChange(
+    typeof value === "string" || typeof value === "number" ? String(value) : undefined,
+  );
   return (
     <div className="glass-card glass-card-hover relative overflow-hidden rounded-2xl p-3">
       <div className="relative z-10 flex items-center justify-between text-xs text-muted-foreground">

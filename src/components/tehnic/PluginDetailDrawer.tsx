@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/drawer";
 import { showWatchStatusQuery } from "@/lib/queries";
 import { relativeTime, formatDateTime } from "./utils";
+import { useFlashOnChange } from "@/hooks/use-flash-on-change";
 import { nextEpisodeWhen } from "@/components/biblioteca/utils";
 import type { PluginInfo } from "./plugins";
 
@@ -48,18 +49,19 @@ export function PluginDetailDrawer({
 
         {plugin && (
           <div className="max-h-[65vh] space-y-2.5 overflow-y-auto overscroll-contain px-4 pb-6 stagger-in">
-            <div className="relative overflow-hidden rounded-2xl glass-card p-3">
-              <span className="shimmer-sweep" />
-              <div className="relative z-10 whitespace-pre-line text-xs leading-relaxed text-muted-foreground">
-                {plugin.details}
-              </div>
+            <div className="whitespace-pre-line rounded-2xl glass-card p-3 text-xs leading-relaxed text-muted-foreground">
+              {plugin.details}
             </div>
 
             <div className="rounded-2xl glass-card divide-y divide-border/50 text-xs">
               <Row icon={<Clock3 className="h-3.5 w-3.5" />} label="Când rulează">
                 {plugin.cadence}
               </Row>
-              <Row icon={<Activity className="h-3.5 w-3.5" />} label="Ultima activitate">
+              <Row
+                icon={<Activity className="h-3.5 w-3.5" />}
+                label="Ultima activitate"
+                flashKey={lastTs}
+              >
                 {lastTs ? (
                   <span title={formatDateTime(lastTs)}>{relativeTime(lastTs)}</span>
                 ) : (
@@ -119,9 +121,12 @@ export function PluginDetailDrawer({
                               {sh.nextEpisode && when
                                 ? ` · urmează ${sh.nextEpisode}, ${when.text}`
                                 : " · niciun episod nou anunțat"}
-                              {sh.lastCheckedAt
-                                ? ` · verificat ${relativeTime(`${sh.lastCheckedAt.replace(" ", "T")}Z`)}`
-                                : " · încă neverificat"}
+                              {" · "}
+                              <FlashValue flashKey={sh.lastCheckedAt}>
+                                {sh.lastCheckedAt
+                                  ? `verificat ${relativeTime(`${sh.lastCheckedAt.replace(" ", "T")}Z`)}`
+                                  : "încă neverificat"}
+                              </FlashValue>
                             </div>
                           </div>
                         );
@@ -159,7 +164,11 @@ export function PluginDetailDrawer({
                 </div>
 
                 <div className="rounded-2xl glass-card divide-y divide-border/50 text-xs">
-                  <Row icon={<RefreshCw className="h-3.5 w-3.5" />} label="Metadate împrospătate">
+                  <Row
+                    icon={<RefreshCw className="h-3.5 w-3.5" />}
+                    label="Metadate împrospătate"
+                    flashKey={watch.lastMetaRefreshAt}
+                  >
                     {watch.lastMetaRefreshAt ? (
                       relativeTime(`${watch.lastMetaRefreshAt.replace(" ", "T")}Z`)
                     ) : (
@@ -176,22 +185,45 @@ export function PluginDetailDrawer({
   );
 }
 
+// `flashKey`: când valoarea afișată se schimbă (ex. "acum 1h" → "acum 2h",
+// după un refetch), valoarea clipește scurt. Animația stă pe cifre, unde
+// înseamnă ceva — "asta tocmai s-a actualizat" — nu pe blocuri de text
+// statice, unde ar fi doar decor.
 function Row({
   icon,
   label,
   children,
+  flashKey,
 }: {
   icon: React.ReactNode;
   label: string;
   children: React.ReactNode;
+  flashKey?: string | number | null;
 }) {
+  const flash = useFlashOnChange(flashKey);
   return (
     <div className="flex items-center justify-between gap-3 px-3 py-2.5">
       <span className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
         {icon}
         {label}
       </span>
-      <span className="min-w-0 truncate text-right text-foreground">{children}</span>
+      <span
+        className={`min-w-0 truncate text-right tabular-nums text-foreground ${flash ? "tick-flash" : ""}`}
+      >
+        {children}
+      </span>
     </div>
   );
+}
+
+// Aceeași idee ca `Row`, dar pentru o valoare dintr-un rând de text liber.
+function FlashValue({
+  flashKey,
+  children,
+}: {
+  flashKey?: string | number | null;
+  children: React.ReactNode;
+}) {
+  const flash = useFlashOnChange(flashKey);
+  return <span className={`tabular-nums ${flash ? "tick-flash" : ""}`}>{children}</span>;
 }
