@@ -447,6 +447,12 @@ export interface PlexTitleDetail {
   autoDownloadQuality: string | null;
   autoDownloadFrom: string | null;
   watchLastCheckedAt: string | null;
+  // Următorul episod anunțat: codul ('S01E04'), data de la TMDB (fără oră) și
+  // instantul exact de la TVmaze, când există. Toate citite din `media` —
+  // reîmprospătate periodic de show-watcher, nu cerute live la deschidere.
+  nextEpisode: string | null;
+  nextEpisodeAirDate: string | null;
+  nextEpisodeAirstamp: string | null;
   // Detalii tehnice — populate doar pentru admin (vezi isAdminOrOwner mai
   // jos); UI-ul le ascunde complet pentru restul utilizatorilor.
   tech: {
@@ -505,6 +511,9 @@ interface MediaRow {
   auto_download_quality: string | null;
   auto_download_from: string | null;
   watch_last_checked_at: string | null;
+  next_episode: string | null;
+  next_episode_air_date: string | null;
+  next_episode_airstamp: string | null;
 }
 
 // Orice titlu clicabil din Bibliotecă are un rând `media` (lista provine
@@ -708,6 +717,9 @@ async function buildDetailFromMediaRow(
     autoDownloadQuality: row.auto_download_quality,
     autoDownloadFrom: row.auto_download_from,
     watchLastCheckedAt: row.watch_last_checked_at,
+    nextEpisode: row.next_episode,
+    nextEpisodeAirDate: row.next_episode_air_date,
+    nextEpisodeAirstamp: row.next_episode_airstamp,
     tech: isAdmin
       ? {
           imdbId: row.imdb_id,
@@ -745,7 +757,8 @@ export const getPlexTitleDetail = createServerFn({ method: "GET" })
            category_name, size, freeleech, internal, save_path, added_via,
            plex_rating_key, is_season_pack, requested_by_user_id, added_at, completed_at,
            subtitle_source, subtitle_detail, subtitle_checked_at, episode_title,
-           tv_status, auto_download, auto_download_quality, auto_download_from, watch_last_checked_at
+           tv_status, auto_download, auto_download_quality, auto_download_from, watch_last_checked_at,
+           next_episode, next_episode_air_date, next_episode_airstamp
            FROM media WHERE id = ?`,
         )
         .get(data.mediaId) as MediaRow | undefined;

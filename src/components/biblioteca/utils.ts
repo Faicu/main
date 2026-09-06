@@ -73,3 +73,34 @@ export function sortItems(items: PlexBrowseItem[], mode: SortMode): PlexBrowseIt
   }
   return items;
 }
+
+// Următorul episod, în ora României. `airstamp` (TVmaze) e un instant ISO cu
+// fus, deci toLocaleString îl convertește singur în ora locală — nu calculăm
+// noi niciun offset și nu se strică la trecerea la ora de vară. Când TVmaze
+// n-are serialul, cădem pe data fără oră de la TMDB.
+export function nextEpisodeWhen(
+  airDate: string | null,
+  airstamp: string | null,
+): { text: string; soon: boolean } | null {
+  const when = airstamp ? new Date(airstamp) : airDate ? new Date(`${airDate}T00:00:00`) : null;
+  if (!when || Number.isNaN(when.getTime())) return null;
+
+  const dayLabel = when.toLocaleDateString("ro-RO", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+  const time = airstamp
+    ? when.toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" })
+    : null;
+
+  // Zile calendaristice, nu diferență de 24h: un episod de mâine dimineață e
+  // "mâine" chiar dacă până atunci mai sunt 9 ore.
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((startOfDay(when) - startOfDay(new Date())) / 86_400_000);
+  const relative =
+    days === 0 ? "azi" : days === 1 ? "mâine" : days > 1 && days <= 7 ? `în ${days} zile` : null;
+
+  const head = relative ?? dayLabel;
+  return { text: time ? `${head}, ${time}` : head, soon: days >= 0 && days <= 2 };
+}

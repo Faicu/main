@@ -191,6 +191,20 @@ export function getDb(): DatabaseSync {
       -- serial cu 7 sezoane din care ai 2.
       auto_download_from TEXT,
       watch_last_checked_at TEXT,
+      -- Metadate de serial reîmprospătate periodic din TMDB (vezi
+      -- refreshShowMetadata). tv_status era scris o singură dată, la prima
+      -- descărcare, și rămânea așa pe veci: un serial încheiat continua să
+      -- ofere urmărirea, iar unul reînnoit după ce fusese marcat 'Ended'
+      -- nu mai arăta niciodată butonul, fiindcă panoul se ascunde exact pe
+      -- valoarea asta.
+      next_episode TEXT,
+      -- Data de la TMDB ("2026-09-13", fără oră) și, separat, instantul exact
+      -- de la TVmaze ("2026-09-13T01:00:00+00:00") — TMDB nu dă ora. Coloane
+      -- distincte, nu una singură cu două înțelesuri: airstamp lipsește
+      -- adesea (serial necunoscut de TVmaze), iar atunci tot vrem data.
+      next_episode_air_date TEXT,
+      next_episode_airstamp TEXT,
+      meta_refreshed_at TEXT,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_media_imdb ON media(imdb_id);
@@ -687,6 +701,26 @@ function applyCleanups(database: DatabaseSync): void {
         console.log(`[db] Migrare v21: normalizate ${fixed.changes} watch_last_checked_at`);
       }
       database.exec("PRAGMA user_version = 21");
+    }
+
+    if (version < 22) {
+      // v22: următorul episod anunțat + reîmprospătarea periodică a
+      // metadatelor de serial. TMDB întoarce next_episode_to_air în același
+      // răspuns pe care îl cerem oricum, deci informația exista deja și era
+      // aruncată.
+      for (const sql of [
+        "ALTER TABLE media ADD COLUMN next_episode TEXT",
+        "ALTER TABLE media ADD COLUMN next_episode_air_date TEXT",
+        "ALTER TABLE media ADD COLUMN next_episode_airstamp TEXT",
+        "ALTER TABLE media ADD COLUMN meta_refreshed_at TEXT",
+      ]) {
+        try {
+          database.exec(sql);
+        } catch {
+          // coloana există deja dintr-o rulare anterioară
+        }
+      }
+      database.exec("PRAGMA user_version = 22");
     }
   }
 }

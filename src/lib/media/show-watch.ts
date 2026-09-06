@@ -72,10 +72,16 @@ interface ShowRow {
 //
 // Sezonul 0 ("Specials") e sărit intenționat: nu face parte din numerotarea
 // pe care o urmărim, iar lansările de pe Filelist nu-l acoperă coerent.
-async function getAiredEpisodes(tmdbId: number, fromSeason: number): Promise<EpisodeKey[]> {
-  const { getTmdbDetailsInternal, getTmdbAllSeasonsInternal } =
-    await import("../tmdb/tmdb.functions");
-  const details = await getTmdbDetailsInternal(tmdbId, "tv").catch(() => null);
+//
+// `details` vine din afară, nu îl cerem noi: apelantul are oricum nevoie de
+// el (pentru metadatele descărcării), iar tmdbFetch n-are niciun cache — două
+// apeluri însemnau două cereri HTTP identice la fiecare ciclu.
+async function getAiredEpisodes(
+  tmdbId: number,
+  fromSeason: number,
+  details: TmdbShowDetails | null,
+): Promise<EpisodeKey[]> {
+  const { getTmdbAllSeasonsInternal } = await import("../tmdb/tmdb.functions");
   const seasonNumbers = (details?.seasons ?? [])
     .map((s) => s.seasonNumber)
     .filter((n) => n >= Math.max(1, fromSeason));
@@ -86,6 +92,61 @@ async function getAiredEpisodes(tmdbId: number, fromSeason: number): Promise<Epi
       .filter((e) => e.aired)
       .map((e) => ({ season: s.seasonNumber, episode: e.episodeNum })),
   );
+}
+
+type TmdbShowDetails = Awaited<
+  ReturnType<typeof import("../tmdb/tmdb.functions").getTmdbDetailsInternal>
+>;
+
+async function fetchShowDetails(tmdbId: number): Promise<TmdbShowDetails | null> {
+  const { getTmdbDetailsInternal } = await import("../tmdb/tmdb.functions");
+  return getTmdbDetailsInternal(tmdbId, "tv").catch(() => null);
+}
+
+// Scrie pe rândul-serial ce ține de titlu, nu de fișiere: statusul curent și
+// următorul episod anunțat. Ambele vin din același răspuns TMDB, deci sunt
+// gratuite oriunde avem deja `details` în mână.
+//
+// Ora exactă vine din altă parte: TMDB dă doar data (air_date), fără oră, așa
+// că o luăm de la TVmaze — aceeași sursă folosită de wizard. `airstamp` e un
+// instant ISO cu fus, deci browserul îl redă direct în ora României, fără să
+// calculăm noi vreun offset. TVmaze e interogat doar când chiar există un
+// episod următor, ca să nu-l batem degeaba pentru serialele încheiate.
+async function writeShowMeta(
+  showId: number,
+  imdbId: string | null,
+  details: TmdbShowDetails | null,
+): Promise<void> {
+  if (!details) return;
+  const next = details.nextEpisode;
+
+  let airstamp: string | null = null;
+  if (next && imdbId) {
+    const { getTvmazeAirstampsInternal } = await import("../tvmaze/tvmaze.functions");
+    const stamps = await getTvmazeAirstampsInternal(imdbId).catch(() => []);
+    airstamp =
+      stamps.find(
+        (a) => a.seasonNumber === next.seasonNumber && a.episodeNum === next.episodeNumber,
+      )?.airstamp ?? null;
+  }
+
+  getDb()
+    .prepare(
+      `UPDATE media
+          SET tv_status = COALESCE(?, tv_status),
+              next_episode = ?,
+              next_episode_air_date = ?,
+              next_episode_airstamp = ?,
+              meta_refreshed_at = datetime('now')
+        WHERE id = ?`,
+    )
+    .run(
+      details.tvStatus,
+      next ? formatEpisodeKey({ season: next.seasonNumber, episode: next.episodeNumber }) : null,
+      next?.airDate ?? null,
+      airstamp,
+      showId,
+    );
 }
 
 export interface ShowWatchOutcome {
@@ -191,7 +252,11 @@ async function checkShowInner(showId: number): Promise<ShowWatchOutcome> {
   );
 
   const from = parseEpisodeKey(row.auto_download_from);
-  const aired = await getAiredEpisodes(row.tmdb_id, from ? from.season : 1);
+  const details = await fetchShowDetails(row.tmdb_id);
+  // Verificarea unui serial urmărit e și momentul în care îi împrospătăm
+  // metadatele — datele sunt deja aici, ar fi risipă să le aruncăm.
+  await writeShowMeta(row.id, details ? row.imdb_id : null, details);
+  const aired = await getAiredEpisodes(row.tmdb_id, from ? from.season : 1, details);
   const missing = aired
     .filter((k) => !ownedKeys.has(formatEpisodeKey(k)))
     .filter((k) => !pendingPackSeasons.has(k.season))
@@ -266,8 +331,6 @@ async function checkShowInner(showId: number): Promise<ShowWatchOutcome> {
   }
 
   const { downloadFilelistCore } = await import("../filelist/download");
-  const { getTmdbDetailsInternal } = await import("../tmdb/tmdb.functions");
-  const details = await getTmdbDetailsInternal(row.tmdb_id, "tv").catch(() => null);
   const covered = new Set<string>();
 
   for (const c of candidates) {
@@ -418,12 +481,15 @@ export async function setShowWatchCore(input: SetShowWatchInput): Promise<void> 
            WHERE parent_id = ? AND season IS NOT NULL AND episode IS NOT NULL`,
       )
       .get(input.mediaId) as { ord: number | null } | undefined;
-    const show = db.prepare("SELECT tmdb_id FROM media WHERE id = ?").get(input.mediaId) as
-      { tmdb_id: number | null } | undefined;
+    const show = db
+      .prepare("SELECT tmdb_id, imdb_id FROM media WHERE id = ?")
+      .get(input.mediaId) as { tmdb_id: number | null; imdb_id: string | null } | undefined;
 
     let bestOrd = owned?.ord ?? 0;
     if (show?.tmdb_id) {
-      const aired = await getAiredEpisodes(show.tmdb_id, 1).catch(() => []);
+      const details = await fetchShowDetails(show.tmdb_id);
+      await writeShowMeta(input.mediaId, show.imdb_id, details);
+      const aired = await getAiredEpisodes(show.tmdb_id, 1, details).catch(() => []);
       for (const k of aired) bestOrd = Math.max(bestOrd, ord(k));
     }
     if (bestOrd > 0) {
@@ -510,4 +576,50 @@ export async function fillMissingEpisodeTitles(): Promise<number> {
   }
   if (filled > 0) console.log(`[show-watch] Completate ${filled} nume de episoade`);
   return filled;
+}
+
+// ---------------------------------------------------------------------------
+// Reîmprospătarea metadatelor de serial
+// ---------------------------------------------------------------------------
+
+const META_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12h per serial
+const MAX_META_SHOWS_PER_RUN = 5;
+
+// Ține la zi tv_status și următorul episod pentru TOATE serialele, nu doar
+// pentru cele urmărite.
+//
+// tv_status era scris o singură dată, la prima descărcare, și rămânea așa pe
+// veci. Conta: panoul de urmărire se ascunde exact pe `tv_status === 'Ended'`,
+// deci un serial reînnoit după ce fusese marcat încheiat nu mai arăta
+// niciodată butonul — adică fix pentru serialele NEurmărite era cel mai
+// important să fie corect.
+export async function refreshShowMetadata(): Promise<number> {
+  const db = getDb();
+  const due = db
+    .prepare(
+      `SELECT id, tmdb_id, imdb_id FROM media
+         WHERE media_type = 'tv_show' AND tmdb_id IS NOT NULL
+           AND (meta_refreshed_at IS NULL OR meta_refreshed_at <= datetime('now', ?))
+         ORDER BY meta_refreshed_at IS NOT NULL, meta_refreshed_at
+         LIMIT ?`,
+    )
+    .all(
+      `-${Math.round(META_INTERVAL_MS / 1000)} seconds`,
+      MAX_META_SHOWS_PER_RUN,
+    ) as unknown as Array<{ id: number; tmdb_id: number; imdb_id: string | null }>;
+
+  let refreshed = 0;
+  for (const row of due) {
+    try {
+      const details = await fetchShowDetails(row.tmdb_id);
+      if (!details) continue;
+      await writeShowMeta(row.id, row.imdb_id, details);
+      refreshed++;
+    } catch (e) {
+      console.warn(`[show-watch] Metadate neactualizate pentru serialul ${row.id}:`, e);
+    }
+  }
+  if (refreshed > 0)
+    console.log(`[show-watch] Metadate reîmprospătate pentru ${refreshed} seriale`);
+  return refreshed;
 }

@@ -17,12 +17,17 @@ const POLL_INTERVAL_MS = 10 * 60 * 1000; // 10 min — cât de des vedem cine a 
 
 async function run(): Promise<void> {
   try {
-    const { checkDueShows, fillMissingEpisodeTitles } =
+    const { checkDueShows, fillMissingEpisodeTitles, refreshShowMetadata } =
       await import("../../src/lib/media/show-watch");
     // Numele episoadelor înainte: e un no-op ieftin (un SELECT) când nu
     // lipsește niciunul, și înseamnă că un episod abia descărcat își capătă
     // numele în cel mult un ciclu, fără să depindă de urmărire.
     await fillMissingEpisodeTitles();
+    // Status + următorul episod, pentru toate serialele (la 12h fiecare) —
+    // nu doar pentru cele urmărite, fiindcă tv_status decide dacă vezi
+    // butonul de urmărire, deci trebuie corect mai ales acolo unde încă n-ai
+    // pornit-o.
+    await refreshShowMetadata();
     await checkDueShows();
   } catch (e) {
     console.warn("[show-watcher] Rulare eșuată:", e);

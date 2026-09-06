@@ -23,6 +23,8 @@ import {
   XCircle,
   ArrowLeft,
   Radar,
+  CalendarClock,
+  CheckCheck,
   RefreshCw,
   CircleDashed,
 } from "lucide-react";
@@ -35,12 +37,13 @@ import {
   DrawerDescription,
 } from "@/components/ui/drawer";
 import { getPlexTitleDetail } from "@/lib/services.functions";
+import type { PlexTitleDetail } from "@/lib/services/plex-browse";
 import { correctSubtitleForMedia, deleteSubtitleForMedia } from "@/lib/filelist.functions";
 import { setShowWatch, checkShowNow } from "@/lib/media/media.functions";
 import { formatMs, formatBytes, formatSpeed, formatEta } from "@/lib/format";
 import { Progress } from "@/components/ui/progress";
 import { StatusBadge } from "./StatusBadge";
-import { episodeCode, addedDate, groupBySeason } from "./utils";
+import { episodeCode, addedDate, groupBySeason, nextEpisodeWhen } from "./utils";
 
 // Drawer-ul de detalii al unui titlu din Bibliotecă — complet independent de
 // listă: primește doar mediaId, își gestionează singur toată starea (query
@@ -510,6 +513,11 @@ export function TitleDetailDrawer({
 
               {d.type === "tv_show" && (
                 <>
+                  {/* Următorul episod — citit din `media`, nu cerut live:
+                      show-watcher îl ține la zi din TMDB (data) + TVmaze (ora
+                      exactă). Ora se redă în fusul browserului, deci apare
+                      direct în ora României. */}
+                  <NextEpisodeLine detail={d} />
                   {/* Urmărirea episoadelor noi. Ascunsă pentru serialele
                       încheiate — n-au ce episoade noi să primească — DAR nu și
                       când e deja pornită: un serial urmărit care se încheie
@@ -767,5 +775,45 @@ export function TitleDetailDrawer({
         </div>
       </DrawerContent>
     </Drawer>
+  );
+}
+
+function NextEpisodeLine({ detail }: { detail: PlexTitleDetail }) {
+  const when = nextEpisodeWhen(detail.nextEpisodeAirDate, detail.nextEpisodeAirstamp);
+
+  // Serial încheiat: spunem asta explicit, în loc să lăsăm un gol care ar
+  // putea fi citit drept "încă n-am aflat".
+  if (detail.tvStatus === "Ended" && !when) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        <CheckCheck className="h-3.5 w-3.5 shrink-0" />
+        Serial încheiat — nu mai urmează episoade
+      </div>
+    );
+  }
+
+  if (!when || !detail.nextEpisode) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+        Niciun episod nou anunțat încă
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs ${
+        when.soon ? "bg-primary/10 text-foreground" : "bg-muted/30 text-muted-foreground"
+      }`}
+    >
+      <CalendarClock
+        className={`h-3.5 w-3.5 shrink-0 ${when.soon ? "animate-pulse text-primary" : ""}`}
+      />
+      <span>
+        Urmează <span className="font-medium text-foreground">{detail.nextEpisode}</span> ·{" "}
+        {when.text}
+      </span>
+    </div>
   );
 }

@@ -25,7 +25,9 @@ interface TvmazeEpisodeRaw {
   airstamp: string | null;
 }
 
-async function getTvmazeAirstampsInternal(imdbId: string): Promise<TvmazeAirstamp[]> {
+// Exportată și pentru cod server-side (show-watch.ts, care salvează ora
+// următorului episod în `media`), nu doar pentru server function-ul de mai jos.
+export async function getTvmazeAirstampsInternal(imdbId: string): Promise<TvmazeAirstamp[]> {
   try {
     const show = await fetchJson<TvmazeLookupShow>(
       `https://api.tvmaze.com/lookup/shows?imdb=${encodeURIComponent(imdbId)}`,
