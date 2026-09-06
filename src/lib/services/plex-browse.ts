@@ -629,10 +629,24 @@ async function buildDetailFromMediaRow(
     });
   }
 
+  // Statusul unui serial vine din episoadele lui, nu de pe rândul-părinte:
+  // 'tv_show' n-are prin construcție nici torrent, nici plex_rating_key, nici
+  // completed_at, deci formula obișnuită îl declara la nesfârșit "Se
+  // descarcă" — și ținea și un refetch la 2.5s care nu se oprea niciodată.
+  const status: PlexTitleDetail["status"] = isShow
+    ? episodes.some((e) => e.status !== "in_library")
+      ? "downloading"
+      : "in_library"
+    : row.plex_rating_key
+      ? "in_library"
+      : row.completed_at
+        ? "processing"
+        : "downloading";
+
   let progress: number | null = null;
   let dlspeed: number | null = null;
   let eta: number | null = null;
-  if (!row.plex_rating_key && row.torrent_hash) {
+  if (!isShow && !row.plex_rating_key && row.torrent_hash) {
     const info = (await fetchQbitProgress([row.torrent_hash])).get(row.torrent_hash);
     if (info) {
       progress = Math.round(info.progress * 1000) / 10;
@@ -670,7 +684,7 @@ async function buildDetailFromMediaRow(
     watchedByMeAt,
     watchedByOthers,
     addedByUsername,
-    status: row.plex_rating_key ? "in_library" : row.completed_at ? "processing" : "downloading",
+    status,
     progress,
     dlspeed,
     eta,
