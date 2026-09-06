@@ -1,89 +1,17 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  Box,
-  GitCommitHorizontal,
-  PlayCircle,
-  Radar,
-  Link2,
-  RotateCcw,
-  Power,
-  PlugZap,
-} from "lucide-react";
+import { Box, ChevronRight } from "lucide-react";
 
 import { activityLogQuery, commitsFromDbQuery, showWatchStatusQuery } from "@/lib/queries";
 import { relativeTime } from "../utils";
-
-// Panoul reflectă exact fișierele din server/plugins/ — un rând per proces
-// care rulează, nu per funcționalitate. Completarea numelor de episoade, de
-// exemplu, nu are rând propriu: e un pas dintr-un tic al lui show-watcher, iar
-// un rând separat ar putea arăta bulina verde chiar dacă plugin-ul e mort.
-//
-// `activityType` = tipul de intrare din jurnal care dovedește că plugin-ul a
-// făcut ceva. Unele n-au niciunul, fiindcă lucrează doar la pornire sau nu
-// loghează când nu găsesc nimic de făcut — atunci rândul rămâne fără
-// timestamp, ceea ce e onest: știm că e încărcat, nu avem dovadă recentă.
-const PLUGINS: Array<{
-  id: string;
-  label: string;
-  description: string;
-  icon: React.ReactNode;
-  activityType: string | null;
-}> = [
-  {
-    id: "show-watcher",
-    label: "Urmărire Seriale",
-    description: "Descărcare automată episoade noi · la 3h per serial",
-    icon: <Radar className="h-4 w-4 text-violet-400" />,
-    activityType: null,
-  },
-  {
-    id: "plex-session-tracker",
-    label: "Plex Session Tracker",
-    description: "Urmărire sesiuni & vizionări · la 30s",
-    icon: <PlayCircle className="h-4 w-4 text-amber-400" />,
-    activityType: "plex_watch_start",
-  },
-  {
-    id: "plex-link-reconciler",
-    label: "Reconciliere Plex",
-    description: "Leagă descărcările rămase fără Plex · la 10 min",
-    icon: <Link2 className="h-4 w-4 text-emerald-400" />,
-    activityType: null,
-  },
-  {
-    id: "filelist-resume",
-    label: "Reluare Descărcări",
-    description: "Repornește polling-ul întrerupt de un restart · la pornire",
-    icon: <RotateCcw className="h-4 w-4 text-blue-400" />,
-    activityType: null,
-  },
-  {
-    id: "github-commit-tracker",
-    label: "GitHub Commit Tracker",
-    description: "Sincronizare commit-uri din GitHub · la pornire",
-    icon: <GitCommitHorizontal className="h-4 w-4 text-purple-400" />,
-    activityType: null,
-  },
-  {
-    id: "activity-boot",
-    label: "Jurnal Pornire/Oprire",
-    description: "Înregistrează ciclul de viață al serverului · la pornire",
-    icon: <PlugZap className="h-4 w-4 text-sky-400" />,
-    activityType: "server_start",
-  },
-  {
-    id: "fast-shutdown",
-    label: "Oprire Controlată",
-    description: "Închide curat la SIGTERM, înainte de SIGKILL · la oprire",
-    icon: <Power className="h-4 w-4 text-rose-400" />,
-    activityType: "server_stop",
-  },
-];
+import { PLUGINS, type PluginInfo } from "../plugins";
+import { PluginDetailDrawer } from "../PluginDetailDrawer";
 
 export function PluginStatusSection() {
   const { data: log } = useQuery(activityLogQuery);
   const { data: commitsData } = useQuery(commitsFromDbQuery);
   const { data: watch } = useQuery(showWatchStatusQuery);
+  const [openPlugin, setOpenPlugin] = useState<PluginInfo | null>(null);
 
   function lastActivity(type: string | null): string | null {
     if (!type || !Array.isArray(log)) return null;
@@ -103,11 +31,17 @@ export function PluginStatusSection() {
     return v ? `${v.replace(" ", "T")}Z` : null;
   }
 
+  function lastTsFor(p: PluginInfo): string | null {
+    if (p.id === "github-commit-tracker") return lastCommitSync();
+    if (p.id === "show-watcher") return lastShowWatch();
+    return lastActivity(p.activityType);
+  }
+
   // Numele de episoade lipsă apar în descriere doar cât timp chiar lipsesc —
   // stare tranzitorie, între descărcarea unui episod și următorul ciclu. Când
   // e 0 (cazul normal), rândul nu spune nimic despre ele.
-  function showWatchDescription(fallback: string): string {
-    if (!watch) return fallback;
+  function descriptionFor(p: PluginInfo): string {
+    if (p.id !== "show-watcher" || !watch) return p.description;
     const shows =
       watch.watchedShows === 0
         ? "niciun serial urmărit"
@@ -122,37 +56,47 @@ export function PluginStatusSection() {
       <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
         <Box className="h-3.5 w-3.5" /> Plugin-uri active
       </h2>
-      <div className="rounded-2xl glass-card divide-y divide-border/50">
+      {/* overflow-hidden: fundalul de hover al primului/ultimului rând ar
+          depăși altfel colțurile rotunjite ale cardului. */}
+      <div className="overflow-hidden rounded-2xl glass-card divide-y divide-border/50 stagger-in">
         {PLUGINS.map((p) => {
-          const lastTs =
-            p.id === "github-commit-tracker"
-              ? lastCommitSync()
-              : p.id === "show-watcher"
-                ? lastShowWatch()
-                : lastActivity(p.activityType);
-          const detail =
-            p.id === "show-watcher" ? showWatchDescription(p.description) : p.description;
+          const lastTs = lastTsFor(p);
           return (
-            <div key={p.id} className="flex items-center gap-3 px-3 py-3">
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setOpenPlugin(p)}
+              className="press-tile flex w-full items-center gap-3 px-3 py-3 text-left transition-colors first:rounded-t-2xl last:rounded-b-2xl hover:bg-muted/40"
+            >
               <div className="shrink-0">{p.icon}</div>
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium leading-tight">{p.label}</div>
-                <div className="text-[11px] text-muted-foreground">{detail}</div>
-              </div>
-              <div className="shrink-0 flex flex-col items-end gap-0.5">
-                <div className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_6px_#4ade80]" />
-                  {lastTs && (
-                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                      {relativeTime(lastTs)}
-                    </span>
-                  )}
+                <div className="truncate text-[11px] text-muted-foreground">
+                  {descriptionFor(p)}
                 </div>
               </div>
-            </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {/* live-dot pulsează; e nepot al lui stagger-in, nu copil
+                    direct, deci propriul lui `animation` nu intră în conflict
+                    cu animația de intrare a rândului. */}
+                <span className="live-dot" />
+                {lastTs && (
+                  <span className="whitespace-nowrap text-[10px] text-muted-foreground">
+                    {relativeTime(lastTs)}
+                  </span>
+                )}
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+              </div>
+            </button>
           );
         })}
       </div>
+
+      <PluginDetailDrawer
+        plugin={openPlugin}
+        lastTs={openPlugin ? lastTsFor(openPlugin) : null}
+        onClose={() => setOpenPlugin(null)}
+      />
     </section>
   );
 }

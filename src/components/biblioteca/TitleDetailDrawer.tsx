@@ -516,7 +516,9 @@ export function TitleDetailDrawer({
                       între timp ar rămâne altfel cu urmărirea activă și fără
                       niciun buton prin care s-o oprești. */}
                   {d.canManage && (d.tvStatus !== "Ended" || d.autoDownload) && (
-                    <div className="rounded-xl border border-border bg-muted/30 p-3 space-y-2">
+                    <div
+                      className={`rounded-xl border border-border bg-muted/30 p-3 space-y-2 ${d.autoDownload ? "border-flow" : ""}`}
+                    >
                       <div className="flex items-center gap-2">
                         <Radar
                           className={`h-4 w-4 shrink-0 ${d.autoDownload ? "text-violet-400" : "text-muted-foreground"}`}
@@ -632,7 +634,7 @@ export function TitleDetailDrawer({
                             {group.episodes.length === 1 ? "episod" : "episoade"}
                           </span>
                         </div>
-                        <div className="space-y-1">
+                        <div className="space-y-1 stagger-in">
                           {group.episodes.map((ep) => (
                             <button
                               key={ep.mediaId}

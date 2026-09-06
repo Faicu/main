@@ -128,14 +128,14 @@ export function BibliotecaList() {
         {isShow && item.autoDownload && (
           <span
             title="Urmărit — episoadele noi se descarcă automat"
-            className="flex shrink-0 items-center rounded-full bg-violet-500/15 px-1.5 py-0.5 text-violet-400"
+            className="pulse-glow flex shrink-0 items-center rounded-full bg-violet-500/15 px-1.5 py-0.5 text-violet-400"
           >
             <Radar className="h-2.5 w-2.5" />
           </span>
         )}
         {isShow && item.downloadingCount > 0 ? (
           <span className="flex shrink-0 items-center gap-1 rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-400">
-            <Layers className="h-2.5 w-2.5" />
+            <Layers className="h-2.5 w-2.5 animate-pulse" />
             {item.downloadingCount}
             {item.progress != null && ` · ${Math.round(item.progress)}%`}
           </span>
