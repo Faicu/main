@@ -42,13 +42,12 @@ export function PluginStatusSection() {
   // e 0 (cazul normal), rândul nu spune nimic despre ele.
   function descriptionFor(p: PluginInfo): string {
     if (p.id !== "show-watcher" || !watch) return p.description;
+    const n = watch.shows.length;
     const shows =
-      watch.watchedShows === 0
-        ? "niciun serial urmărit"
-        : `${watch.watchedShows} ${watch.watchedShows === 1 ? "serial urmărit" : "seriale urmărite"}`;
-    if (watch.missingEpisodeTitles === 0) return shows;
-    const n = watch.missingEpisodeTitles;
-    return `${shows} · ${n} ${n === 1 ? "episod fără nume" : "episoade fără nume"}`;
+      n === 0 ? "niciun serial urmărit" : `${n} ${n === 1 ? "serial urmărit" : "seriale urmărite"}`;
+    const m = watch.missingTitles.length;
+    if (m === 0) return shows;
+    return `${shows} · ${m} ${m === 1 ? "episod fără nume" : "episoade fără nume"}`;
   }
 
   return (

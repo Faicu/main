@@ -37,9 +37,9 @@ export const PLUGINS: PluginInfo[] = [
     id: "show-watcher",
     label: "Urmărire Seriale",
     description: "Descărcare automată episoade noi",
-    cadence: "la 3h per serial (verificat din 10 în 10 min)",
+    cadence: "la 3h per serial · metadate la 12h · verificat din 10 în 10 min",
     details:
-      "Compară ce episoade au fost difuzate (TMDB) cu ce ai deja în bibliotecă și descarcă diferența de pe Filelist, strict după IMDb ID. Nu ține minte ce a văzut ultima dată: întreabă de fiecare dată realitatea, deci se poate relua oricând, se repară singur după un restart și nu poate descărca de două ori. Tot aici se completează și numele episoadelor care încă n-au unul.",
+      "Face trei lucruri la fiecare tic, fiecare cu ritmul lui.\n\n1. Descărcarea episoadelor noi, la 3h per serial urmărit: compară ce s-a difuzat (TMDB) cu ce ai deja în bibliotecă și aduce diferența de pe Filelist, strict după IMDb ID. Nu ține minte ce a văzut ultima dată — întreabă de fiecare dată realitatea, deci se poate relua oricând, se repară singur după un restart și nu poate descărca de două ori.\n\n2. Numele episoadelor, pentru cele care încă n-au unul.\n\n3. Metadatele fiecărui serial, la 12h — inclusiv ale celor neurmărite: status (încheiat / în producție), titlul românesc și cel original, anul, și următorul episod anunțat. Contează că merge și pentru serialele neurmărite: statusul decide dacă ți se oferă butonul de urmărire, deci trebuie corect tocmai acolo unde încă n-ai pornit-o.",
     icon: <Radar className="h-4 w-4 text-violet-400" />,
     activityType: null,
   },

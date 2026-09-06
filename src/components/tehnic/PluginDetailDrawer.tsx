@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Clock3, FileCode2, Activity, Radar, CircleHelp } from "lucide-react";
+import { Clock3, FileCode2, Activity, Radar, CircleHelp, RefreshCw, Tv, Tag } from "lucide-react";
 
 import {
   Drawer,
@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/drawer";
 import { showWatchStatusQuery } from "@/lib/queries";
 import { relativeTime, formatDateTime } from "./utils";
+import { nextEpisodeWhen } from "@/components/biblioteca/utils";
 import type { PluginInfo } from "./plugins";
 
 // Detaliile unui plugin de fundal. Deschis din lista de pe Tehnic — până acum
@@ -41,7 +42,7 @@ export function PluginDetailDrawer({
 
         {plugin && (
           <div className="max-h-[65vh] space-y-2.5 overflow-y-auto overscroll-contain px-4 pb-6 stagger-in">
-            <div className="rounded-2xl glass-card p-3 text-xs leading-relaxed text-muted-foreground">
+            <div className="whitespace-pre-line rounded-2xl glass-card p-3 text-xs leading-relaxed text-muted-foreground">
               {plugin.details}
             </div>
 
@@ -74,22 +75,90 @@ export function PluginDetailDrawer({
             )}
 
             {isWatcher && watch && (
-              <div className="rounded-2xl glass-card divide-y divide-border/50 text-xs">
-                <Row icon={<Radar className="h-3.5 w-3.5" />} label="Seriale urmărite">
-                  {watch.watchedShows === 0 ? (
-                    <span className="text-muted-foreground">niciunul</span>
+              <>
+                {/* Numere goale ("Seriale urmărite: 2") nu spun nimic util —
+                    întrebarea firească e "care?". Aceleași date, doar
+                    desfășurate. */}
+                <div className="rounded-2xl glass-card p-3 text-xs">
+                  <div className="mb-2 flex items-center gap-1.5 text-muted-foreground">
+                    <Radar className="h-3.5 w-3.5" /> Seriale urmărite
+                  </div>
+                  {watch.shows.length === 0 ? (
+                    <div className="text-muted-foreground">
+                      Niciunul. Pornești urmărirea din drawer-ul unui serial, în Bibliotecă.
+                    </div>
                   ) : (
-                    watch.watchedShows
+                    <div className="space-y-1.5">
+                      {watch.shows.map((sh) => {
+                        const when = nextEpisodeWhen(sh.nextEpisodeAirDate, sh.nextEpisodeAirstamp);
+                        return (
+                          <div key={sh.mediaId} className="rounded-lg bg-muted/40 px-2 py-1.5">
+                            <div className="flex items-center gap-2">
+                              <Tv className="h-3 w-3 shrink-0 text-blue-400" />
+                              <span className="min-w-0 flex-1 truncate font-medium">
+                                {sh.title}
+                              </span>
+                              {sh.quality && (
+                                <span className="flex shrink-0 items-center gap-0.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">
+                                  <Tag className="h-2.5 w-2.5" />
+                                  {sh.quality}
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                              {sh.from ? `de după ${sh.from}` : "recuperează tot ce lipsește"}
+                              {sh.nextEpisode && when
+                                ? ` · urmează ${sh.nextEpisode}, ${when.text}`
+                                : " · niciun episod nou anunțat"}
+                              {sh.lastCheckedAt
+                                ? ` · verificat ${relativeTime(`${sh.lastCheckedAt.replace(" ", "T")}Z`)}`
+                                : " · încă neverificat"}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
-                </Row>
-                <Row icon={<Activity className="h-3.5 w-3.5" />} label="Episoade fără nume">
-                  {watch.missingEpisodeTitles === 0 ? (
-                    <span className="text-emerald-400">toate completate</span>
+                </div>
+
+                <div className="rounded-2xl glass-card p-3 text-xs">
+                  <div className="mb-2 flex items-center gap-1.5 text-muted-foreground">
+                    <Activity className="h-3.5 w-3.5" /> Episoade fără nume
+                  </div>
+                  {watch.missingTitles.length === 0 ? (
+                    <div className="text-emerald-400">Toate completate.</div>
                   ) : (
-                    <span className="text-amber-400">{watch.missingEpisodeTitles}</span>
+                    <>
+                      <div className="flex flex-wrap gap-1">
+                        {watch.missingTitles.map((m) => (
+                          <span
+                            key={`${m.show}-${m.code}`}
+                            className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-400"
+                          >
+                            {m.show} {m.code}
+                          </span>
+                        ))}
+                      </div>
+                      {/* Fără explicație, lista pare o defecțiune. De obicei nu
+                          e: TMDB pur și simplu n-a publicat încă titlul. */}
+                      <div className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                        TMDB n-are încă un titlu pentru ele. Se reîncearcă la fiecare ciclu; după 14
+                        zile de la difuzare acceptăm numele generic și nu mai interogăm.
+                      </div>
+                    </>
                   )}
-                </Row>
-              </div>
+                </div>
+
+                <div className="rounded-2xl glass-card divide-y divide-border/50 text-xs">
+                  <Row icon={<RefreshCw className="h-3.5 w-3.5" />} label="Metadate împrospătate">
+                    {watch.lastMetaRefreshAt ? (
+                      relativeTime(`${watch.lastMetaRefreshAt.replace(" ", "T")}Z`)
+                    ) : (
+                      <span className="text-muted-foreground">încă niciodată</span>
+                    )}
+                  </Row>
+                </div>
+              </>
             )}
           </div>
         )}
