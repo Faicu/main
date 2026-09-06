@@ -19,6 +19,7 @@ import {
 import { getPlexLibraryBrowse, getRecentWatches } from "./services.functions";
 import { getRefreshMs, getFastRefreshMs, REFRESH_DEFAULT_MS } from "./refresh-rate";
 import { getNetworkLink } from "./system/network-link.functions";
+import { getShowWatchStatus } from "./media/media.functions";
 
 // Ritmul statisticilor live e reglabil din pagina Sistem — vezi
 // lib/refresh-rate.ts. `refetchInterval` primește o funcție, evaluată la
@@ -228,4 +229,14 @@ export const networkLinkQuery = queryOptions({
   staleTime: 30_000,
   refetchInterval: 60_000,
   refetchOnWindowFocus: true,
+});
+
+// Starea urmăririi serialelor, pentru panoul "Plugin-uri active" din Tehnic.
+// Ritm lent: plugin-ul verifică oricum o dată la 3 ore per serial, deci n-are
+// rost un puls mai des decât atât.
+export const showWatchStatusQuery = queryOptions({
+  queryKey: ["showWatchStatus"],
+  queryFn: () => getShowWatchStatus(),
+  staleTime: 60_000,
+  refetchInterval: 120_000,
 });

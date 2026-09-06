@@ -72,7 +72,14 @@ export function TitleDetailDrawer({
   // Nu un al doilea drawer/dialog peste primul: overlay-urile Radix imbricate
   // într-un Drawer vaul îngheață ecranul fără nicio eroare logată (vezi
   // commit c76ce30 și incidentul din AddMediaWizard).
-  const [openEpisodeId, setOpenEpisodeId] = useState<number | null>(null);
+  // Perechea (serial, episod), nu doar id-ul episodului: ștergerea unui titlu
+  // pune mediaId pe null din afară, fără ca vaul să apeleze onOpenChange, deci
+  // un reset făcut doar acolo lăsa episodul agățat — următorul titlu deschis
+  // ar fi afișat direct episodul rămas din sesiunea anterioară. Legat de
+  // serialul lui, starea se invalidează singură, fără useEffect.
+  const [openEpisode, setOpenEpisode] = useState<{ showId: number; episodeId: number } | null>(
+    null,
+  );
   const [savingWatch, setSavingWatch] = useState(false);
   const [checkingNow, setCheckingNow] = useState(false);
   const [pickingWatch, setPickingWatch] = useState(false);
@@ -86,6 +93,7 @@ export function TitleDetailDrawer({
   // el devine subiectul afișat, iar butonul înapoi doar golește starea asta.
   // Dacă titlul de bază a dispărut (ex. ștergere), episodul deschis peste el
   // nu mai are context — nu ținem o cerere vie pentru un drawer închis.
+  const openEpisodeId = openEpisode?.showId === mediaId ? openEpisode.episodeId : null;
   const activeId = mediaId == null ? null : (openEpisodeId ?? mediaId);
 
   const detail = useQuery({
@@ -225,7 +233,7 @@ export function TitleDetailDrawer({
       open={!!mediaId}
       onOpenChange={(o) => {
         if (o) return;
-        setOpenEpisodeId(null);
+        setOpenEpisode(null);
         onClose();
       }}
     >
@@ -234,7 +242,7 @@ export function TitleDetailDrawer({
           {openEpisodeId != null && (
             <button
               type="button"
-              onClick={() => setOpenEpisodeId(null)}
+              onClick={() => setOpenEpisode(null)}
               className="mb-1 flex w-fit items-center gap-1 rounded-full bg-muted/60 px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <ArrowLeft className="h-3 w-3" /> Înapoi la serial
@@ -503,8 +511,11 @@ export function TitleDetailDrawer({
               {d.type === "tv_show" && (
                 <>
                   {/* Urmărirea episoadelor noi. Ascunsă pentru serialele
-                      încheiate — n-au ce episoade noi să primească. */}
-                  {d.tvStatus !== "Ended" && d.canManage && (
+                      încheiate — n-au ce episoade noi să primească — DAR nu și
+                      când e deja pornită: un serial urmărit care se încheie
+                      între timp ar rămâne altfel cu urmărirea activă și fără
+                      niciun buton prin care s-o oprești. */}
+                  {d.canManage && (d.tvStatus !== "Ended" || d.autoDownload) && (
                     <div className="rounded-xl border border-border bg-muted/30 p-3 space-y-2">
                       <div className="flex items-center gap-2">
                         <Radar
@@ -626,7 +637,9 @@ export function TitleDetailDrawer({
                             <button
                               key={ep.mediaId}
                               type="button"
-                              onClick={() => setOpenEpisodeId(ep.mediaId)}
+                              onClick={() =>
+                                setOpenEpisode({ showId: mediaId!, episodeId: ep.mediaId })
+                              }
                               className="flex w-full items-center gap-2 rounded-lg bg-muted/40 px-2 py-1.5 text-left transition-all hover:bg-muted/60 active:scale-[0.99]"
                             >
                               {ep.status === "in_library" ? (
@@ -638,8 +651,15 @@ export function TitleDetailDrawer({
                               ) : (
                                 <CircleDashed className="h-3 w-3 shrink-0 animate-pulse text-blue-400" />
                               )}
+                              {/* Un pachet de sezon încă neterminat e un
+                                  singur rând cu episode NULL — se desface în
+                                  episoade abia după ce Plex îl indexează.
+                                  Fără cazul ăsta, rândul afișa doar "—". */}
                               <span className="shrink-0 text-[11px] font-medium tabular-nums">
-                                {episodeCode(ep.season, ep.episode) ?? "—"}
+                                {episodeCode(ep.season, ep.episode) ??
+                                  (ep.isSeasonPack && ep.season != null
+                                    ? `Sezonul ${ep.season} — pachet complet`
+                                    : "—")}
                               </span>
                               {/* Numele lipsește cât timp completarea din TMDB
                                   n-a ajuns la episodul ăsta — rândul rămâne

@@ -97,3 +97,23 @@ export const checkShowNow = createServerFn({ method: "POST" })
       }
     },
   );
+
+// Starea urmăririi, pentru panoul "Plugin-uri active" din Tehnic: câte
+// seriale sunt urmărite și când a verificat plugin-ul ultima dată. Timestamp-ul
+// vine din `media`, nu din jurnalul de activitate — o verificare care n-a găsit
+// nimic nu loghează nimic (corect, altfel ar umple jurnalul la fiecare 3 ore),
+// deci jurnalul n-ar arăta niciodată că plugin-ul e viu.
+export const getShowWatchStatus = createServerFn({ method: "GET" }).handler(
+  async (): Promise<{ watchedShows: number; lastCheckedAt: string | null }> => {
+    const { requireAuth } = await import("../auth/admin.server");
+    await requireAuth();
+    const { getDb } = await import("../db");
+    const row = getDb()
+      .prepare(
+        `SELECT COUNT(*) AS n, MAX(watch_last_checked_at) AS last
+           FROM media WHERE media_type = 'tv_show' AND auto_download = 1`,
+      )
+      .get() as { n: number; last: string | null };
+    return { watchedShows: row?.n ?? 0, lastCheckedAt: row?.last ?? null };
+  },
+);

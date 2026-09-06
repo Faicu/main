@@ -96,10 +96,35 @@ export interface ShowWatchOutcome {
   skipped: string | null;
 }
 
+// Serialele aflate chiar acum în verificare. Restul logicii e idempotentă
+// pentru rulări SUCCESIVE (compară mereu realitatea), dar nu și pentru două
+// rulări SIMULTANE: butonul "Verifică acum" apăsat în timpul unui ciclu
+// automat ar face ambele să vadă aceleași episoade lipsă și să pornească
+// același torrent de două ori, înainte ca vreuna să apuce să scrie ceva.
+const inProgress = new Set<number>();
+
 // Verifică un singur serial și pornește descărcările lipsă. Exportată separat
 // de bucla periodică fiindcă butonul "Verifică acum" din drawer o cheamă
 // direct, pentru serialul deschis.
 export async function checkShow(showId: number): Promise<ShowWatchOutcome> {
+  if (inProgress.has(showId)) {
+    return {
+      showId,
+      title: "?",
+      missing: [],
+      downloaded: [],
+      skipped: "o verificare e deja în curs",
+    };
+  }
+  inProgress.add(showId);
+  try {
+    return await checkShowInner(showId);
+  } finally {
+    inProgress.delete(showId);
+  }
+}
+
+async function checkShowInner(showId: number): Promise<ShowWatchOutcome> {
   const db = getDb();
   const row = db
     .prepare(
@@ -146,10 +171,30 @@ export async function checkShow(showId: number): Promise<ShowWatchOutcome> {
       .map((e) => formatEpisodeKey({ season: e.season!, episode: e.episode! })),
   );
 
+  // Un pachet de sezon pornit, dar încă neterminat, e un singur rând cu
+  // episode NULL: episoadele lui apar abia după ce Plex îl indexează și
+  // resolveSeasonPackPlexLinks îl desface. Până atunci episoadele lui ar
+  // părea în continuare "lipsă", iar la ciclul următor am fi descărcat
+  // episoadele individuale PESTE pachetul care oricum le aduce. Plasa cu
+  // torrent_name de mai jos nu acoperă cazul ăsta — acolo e vorba de alt
+  // torrent, cu alt nume.
+  const pendingPackSeasons = new Set(
+    (
+      db
+        .prepare(
+          `SELECT DISTINCT season FROM media
+             WHERE parent_id = ? AND is_season_pack = 1
+               AND plex_rating_key IS NULL AND season IS NOT NULL`,
+        )
+        .all(row.id) as unknown as Array<{ season: number }>
+    ).map((r) => r.season),
+  );
+
   const from = parseEpisodeKey(row.auto_download_from);
   const aired = await getAiredEpisodes(row.tmdb_id, from ? from.season : 1);
   const missing = aired
     .filter((k) => !ownedKeys.has(formatEpisodeKey(k)))
+    .filter((k) => !pendingPackSeasons.has(k.season))
     .filter((k) => !from || ord(k) > ord(from))
     .sort((a, b) => ord(a) - ord(b));
   result.missing = missing.map(formatEpisodeKey);
@@ -339,6 +384,24 @@ export async function setShowWatchCore(input: SetShowWatchInput): Promise<void> 
   const db = getDb();
   if (!input.enabled) {
     db.prepare("UPDATE media SET auto_download = 0 WHERE id = ? AND media_type = 'tv_show'").run(
+      input.mediaId,
+    );
+    return;
+  }
+
+  // Dacă urmărirea e DEJA pornită, singurul lucru care se schimbă e calitatea.
+  // Punctul de pornire rămâne neatins: recalculându-l, o simplă schimbare de
+  // calitate ar muta `auto_download_from` la ultimul episod difuzat și ar sări
+  // silențios peste episoadele care încă așteptau un torrent. E exact bug-ul
+  // reparat în 4a94143 la implementarea veche ("pinForMonitoring rescria
+  // necondiționat setările de urmărire, resetând silențios orice
+  // personalizare"), doar cu alt nume.
+  const current = db
+    .prepare("SELECT auto_download FROM media WHERE id = ? AND media_type = 'tv_show'")
+    .get(input.mediaId) as { auto_download: number } | undefined;
+  if (current?.auto_download) {
+    db.prepare("UPDATE media SET auto_download_quality = ? WHERE id = ?").run(
+      input.quality ?? "1080p",
       input.mediaId,
     );
     return;

@@ -11,12 +11,7 @@ interface Props {
 }
 
 export function Meter({ value, label, right, tone, active }: Props) {
-  const flow =
-    active === "up"
-      ? "progress-flow progress-flow-up"
-      : active
-        ? "progress-flow"
-        : null;
+  const flow = active === "up" ? "progress-flow progress-flow-up" : active ? "progress-flow" : null;
   const pct = Math.min(100, Math.max(0, value));
   const auto: Props["tone"] = pct >= 90 ? "danger" : pct >= 75 ? "warn" : "default";
   const t = tone ?? auto;
