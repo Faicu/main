@@ -134,7 +134,7 @@ export function BibliotecaList() {
             <ThinkingOrb
               state="searching"
               size={20}
-              style={{ width: 12, height: 12 }}
+              style={{ width: 16, height: 16 }}
               aria-label="Urmărit"
             />
           </span>

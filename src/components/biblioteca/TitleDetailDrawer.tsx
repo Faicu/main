@@ -28,6 +28,7 @@ import {
   RefreshCw,
   CircleDashed,
 } from "lucide-react";
+import { ThinkingOrb } from "thinking-orbs";
 
 import {
   Drawer,
@@ -555,9 +556,16 @@ export function TitleDetailDrawer({
                       className={`rounded-xl border border-border bg-muted/30 p-3 space-y-2 ${d.autoDownload ? "border-flow" : ""}`}
                     >
                       <div className="flex items-center gap-2">
-                        <Radar
-                          className={`h-4 w-4 shrink-0 ${d.autoDownload ? "text-violet-400" : "text-muted-foreground"}`}
-                        />
+                        {d.autoDownload ? (
+                          <ThinkingOrb
+                            state="searching"
+                            size={20}
+                            style={{ width: 18, height: 18, flexShrink: 0 }}
+                            aria-label="Urmărit"
+                          />
+                        ) : (
+                          <Radar className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        )}
                         <span className="flex-1 text-xs font-medium">
                           {d.autoDownload ? "Urmărit" : "Urmărește episoade noi"}
                         </span>
