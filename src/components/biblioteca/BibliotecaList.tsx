@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Search, Film, Tv, Eye, Users, Layers, AlertTriangle, Radar } from "lucide-react";
+import { Search, Film, Tv, Eye, Users, Layers, AlertTriangle } from "lucide-react";
+import { ThinkingOrb } from "thinking-orbs";
 
 import { plexLibraryBrowseQuery } from "@/lib/queries";
 import { deleteMediaEntry } from "@/lib/filelist.functions";
@@ -128,9 +129,14 @@ export function BibliotecaList() {
         {isShow && item.autoDownload && (
           <span
             title="Urmărit — episoadele noi se descarcă automat"
-            className="pulse-glow flex shrink-0 items-center rounded-full bg-violet-500/15 px-1.5 py-0.5 text-violet-400"
+            className="flex shrink-0 items-center rounded-full bg-violet-500/15 px-1"
           >
-            <Radar className="h-2.5 w-2.5" />
+            <ThinkingOrb
+              state="searching"
+              size={20}
+              style={{ width: 12, height: 12 }}
+              aria-label="Urmărit"
+            />
           </span>
         )}
         {isShow && item.downloadingCount > 0 ? (
