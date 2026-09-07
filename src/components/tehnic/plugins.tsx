@@ -1,13 +1,6 @@
 import type { ReactNode } from "react";
-import {
-  GitCommitHorizontal,
-  PlayCircle,
-  Radar,
-  Link2,
-  RotateCcw,
-  Power,
-  PlugZap,
-} from "lucide-react";
+import { GitCommitHorizontal, PlayCircle, Link2, RotateCcw, Power, PlugZap } from "lucide-react";
+import { ThinkingOrb } from "thinking-orbs";
 
 // Catalogul plugin-urilor de fundal — sursă unică pentru lista din Tehnic și
 // pentru drawer-ul de detalii. Reflectă exact fișierele din server/plugins/:
@@ -40,7 +33,7 @@ export const PLUGINS: PluginInfo[] = [
     cadence: "la 3h per serial · metadate la 12h · verificat din 10 în 10 min",
     details:
       "Face trei lucruri la fiecare tic, fiecare cu ritmul lui.\n\n1. Descărcarea episoadelor noi, la 3h per serial urmărit: compară ce s-a difuzat (TMDB) cu ce ai deja în bibliotecă și aduce diferența de pe Filelist, strict după IMDb ID. Nu ține minte ce a văzut ultima dată — întreabă de fiecare dată realitatea, deci se poate relua oricând, se repară singur după un restart și nu poate descărca de două ori.\n\n2. Numele episoadelor, pentru cele care încă n-au unul.\n\n3. Metadatele fiecărui serial, la 12h — inclusiv ale celor neurmărite: status (încheiat / în producție), titlul românesc și cel original, anul, și următorul episod anunțat. Contează că merge și pentru serialele neurmărite: statusul decide dacă ți se oferă butonul de urmărire, deci trebuie corect tocmai acolo unde încă n-ai pornit-o.",
-    icon: <Radar className="h-4 w-4 text-violet-400" />,
+    icon: <ThinkingOrb state="searching" size={20} style={{ width: 16, height: 16 }} />,
     activityType: null,
   },
   {
