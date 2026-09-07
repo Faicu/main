@@ -129,7 +129,7 @@ export function BibliotecaList() {
         {isShow && item.autoDownload && (
           <span
             title="Urmărit — episoadele noi se descarcă automat"
-            className="flex shrink-0 items-center rounded-full bg-violet-500/15 px-1"
+            className="flex shrink-0 items-center"
           >
             <ThinkingOrb
               state="searching"
